@@ -14,7 +14,7 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
 SCRIPT_PROMPT_TEMPLATE = """You are a professional YouTube scriptwriter. Write a short-form video voiceover script (about {length} seconds when read aloud) on this topic: "{topic}".
 
