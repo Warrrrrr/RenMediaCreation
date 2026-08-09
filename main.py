@@ -8,6 +8,9 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from psychology import PSYCHOLOGY_TECHNIQUES
+from youtube_api import extract_video_id, get_video_metadata, search_current_titles, QuotaExceededError
+
 app = FastAPI()
 
 AUDIO_DIR = "generated_audio"
@@ -15,6 +18,7 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
 WORDS_PER_MINUTE = 150
@@ -28,6 +32,16 @@ VOICES = [
     ("en-ZA-LeahNeural", "Leah (South African female)"),
 ]
 
+# =============================================================================
+# VIDEO STRUCTURE
+# =============================================================================
+STRUCTURE_TEMPLATE = """1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines.
+2. Setup / Exposition (next ~10% of runtime) -- validate the viewer's current experience or struggle before introducing anything new, so they feel seen and stay with you.
+3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then".
+4. Climax -- where the macro open loop gets resolved.
+5. Payoff / Resolution -- the satisfying takeaway. This video should feel self-contained and fully resolved -- do not tease or open a loop for a future video.
+6. Outro / CTA -- a natural subscribe ask."""
+
 OUTLINE_PROMPT_TEMPLATE = """You are a professional long-form YouTube scriptwriter and story architect. Plan the STRUCTURE for a video on this topic: "{topic}".
 
 Target spoken length: approximately {length_minutes} minutes (about {word_target} words of narration).
@@ -36,21 +50,15 @@ Output a structured beat sheet, NOT prose narration. Use this exact format, one 
 
 [SECTION NAME] -- Purpose/content of this beat (1-3 sentences describing what happens and which technique it uses)
 
-Follow this architecture:
-1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines.
-2. Macro Open Loop -- plant one compelling question or tease early that will only fully resolve near the end (the Zeigarnik effect: unresolved things stick in memory).
-3. Four to six escalating Acts/Sections -- each section should:
-   - Build on the previous one using "But" / "Therefore" causal logic, not "and then"
-   - Contain its own small open loop or pattern interrupt (a tone shift, a rhetorical question, an unexpected turn) roughly every 60-90 seconds of runtime, to reset viewer attention
-   - Use foot-in-the-door content logic: early sections introduce small, easy-to-agree-with ideas that later sections build into bigger, more surprising claims
-4. One Audience Foot-in-the-Door Moment -- placed roughly two-thirds of the way through: a small, low-friction ask of the viewer (guess an answer, comment one word, etc.) that primes them to say "yes" to the bigger ask later.
-5. Climax -- where the macro open loop from step 2 gets resolved.
-6. Payoff / Resolution -- the satisfying takeaway.
-7. Outro / CTA -- a natural subscribe ask that follows from the audience foot-in-the-door moment planted earlier.
+VIDEO STRUCTURE TO FOLLOW:
+{structure}
+
+PSYCHOLOGICAL / STORYTELLING TECHNIQUES TO WEAVE IN (apply each one at the beat where it fits best):
+{techniques}
 
 Rules:
 - Do not write any actual narration text yet -- structural plan only.
-- Do not invent or reference specific named studies, researchers, or statistics -- describe psychological techniques generically (e.g. "plant an open loop here") without fabricating sources.
+- Do not invent or reference specific named studies, researchers, or statistics -- describe psychological techniques generically without fabricating sources.
 - Keep each beat description concise.
 """
 
@@ -63,11 +71,37 @@ APPROVED OUTLINE:
 
 Write the full narration following this outline's structure and beats, in order. Rules:
 - Output ONLY the spoken narration text a narrator would read aloud -- no section headers, timestamps, labels, or stage directions.
+- Never include bracketed markers like [pause] or [beat] in the text -- edge-tts will read them aloud literally since it cannot process custom pause markup. Use punctuation (periods, ellipses, em dashes, short sentences) to create pacing and pauses instead.
 - Write it as one continuous piece, not a list of separate segments.
 - Use "But" and "therefore" (or natural equivalents) to connect ideas causally rather than "and then".
-- Vary sentence pacing: short, punchy sentences during tense/pattern-interrupt beats; longer explanatory sentences when building context.
+- NEVER use story-structure or technique jargon inside the narration itself -- words like "open loop", "macro loop", "climax", "act", "beat", "pattern interrupt", or "foot-in-the-door" must never be spoken by the narrator. Execute the technique; don't name it.
+- Vary sentence pacing concretely: any sentence longer than about 25 words must be followed by one under about 10 words. Do not let more than two long sentences in a row pass without a short one breaking the rhythm.
 - Do not invent or cite specific named studies, researchers, or statistics -- use soft, generic attribution only for well-established ideas (e.g. "many psychologists point to...") and never fabricate a source.
 - Follow the outline's placement of the open loop resolution, the audience foot-in-the-door moment, and the CTA exactly as planned.
+"""
+
+TITLE_CHECK_PROMPT_TEMPLATE = """You are a YouTube title strategist. The creator wants to make a video about: "{topic}".
+
+{context_block}
+
+Suggest ONE improved, currently-relevant title for this video. Then in one short paragraph, explain why this title works right now.
+
+Format your answer exactly as:
+TITLE: <the suggested title>
+WHY: <short explanation>
+"""
+
+VIDEO_INSPIRATION_PROMPT_TEMPLATE = """You are a YouTube content strategist. Another creator published a video with this public metadata:
+
+Title: {source_title}
+Description: {source_description}
+Tags: {source_tags}
+
+Using this ONLY as inspiration for the topic/angle (never copy its wording, claims, or structure), suggest an original title and topic for a NEW, different video the user could make on a related angle.
+
+Format your answer exactly as:
+TITLE: <the suggested title>
+WHY: <short explanation of the angle and how it differs from the source>
 """
 
 
@@ -99,16 +133,122 @@ def esc(text: str) -> str:
     return html.escape(text or "")
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    body_html = """
+def outline_start_form(topic: str) -> str:
+    return f"""
+      <h3>Suggested topic/title</h3>
+      <p>Edit if needed, then continue to the outline stage.</p>
       <form method="post" action="/outline">
-        <label>Topic</label><br>
-        <input name="topic" style="width:100%;padding:8px;font-size:16px;" required><br><br>
+        <input name="topic" value="{esc(topic)}" style="width:100%;padding:8px;font-size:16px;" required><br><br>
         <label>Target length (minutes)</label><br>
         <input name="length_minutes" value="10" style="width:100%;padding:8px;font-size:16px;"><br><br>
         <button type="submit" style="padding:10px 20px;font-size:16px;">Generate Outline</button>
       </form>
+      <p><a href="/">&larr; Start over</a></p>
+    """
+
+
+def parse_title_suggestion(raw_text: str) -> tuple:
+    title_match = re.search(r"TITLE:\s*(.+)", raw_text)
+    why_match = re.search(r"WHY:\s*(.+)", raw_text, re.DOTALL)
+    title = title_match.group(1).strip() if title_match else raw_text.strip()
+    why = why_match.group(1).strip() if why_match else ""
+    return title, why
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    body_html = """
+      <h3>Option 1 -- Start from a topic (checks what's currently working)</h3>
+      <form method="post" action="/check-title">
+        <input name="topic" placeholder="e.g. why women lose interest fast" style="width:100%;padding:8px;font-size:16px;" required><br><br>
+        <button type="submit" style="padding:10px 20px;font-size:16px;">Check Title</button>
+      </form>
+      <br>
+      <h3>Option 2 -- Start from a YouTube video (as inspiration only)</h3>
+      <form method="post" action="/video-inspiration">
+        <input name="video_url" placeholder="https://youtube.com/watch?v=..." style="width:100%;padding:8px;font-size:16px;" required><br><br>
+        <button type="submit" style="padding:10px 20px;font-size:16px;">Get Suggested Angle</button>
+      </form>
+    """
+    return page(body_html)
+
+
+@app.post("/check-title", response_class=HTMLResponse)
+async def check_title(topic: str = Form(...)):
+    if not GEMINI_API_KEY:
+        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY.</p>")
+
+    context_block = ""
+    quota_note = ""
+
+    if YOUTUBE_API_KEY:
+        try:
+            results = search_current_titles(topic, YOUTUBE_API_KEY, max_results=5)
+            if results:
+                lines = "\n".join(
+                    f"- \"{r['title']}\" ({r['view_count']} views, published {r['published_at'][:10]})"
+                    for r in results
+                )
+                context_block = f"Here is what's currently ranking on this topic on YouTube:\n{lines}"
+            else:
+                context_block = "No current search data was found for this topic -- use general best practice instead."
+        except QuotaExceededError:
+            context_block = "No live search data is available right now (daily search budget used up) -- use general best practice instead."
+            quota_note = "<p><em>Note: today's search-based check budget is used up, so this suggestion is based on general best practice rather than live data.</em></p>"
+    else:
+        context_block = "No YouTube API key is configured -- use general best practice instead."
+
+    prompt = TITLE_CHECK_PROMPT_TEMPLATE.format(topic=topic, context_block=context_block)
+
+    try:
+        raw = call_gemini(prompt)
+    except Exception as e:
+        return page(f"<p style='color:#c0392b;'>Title check failed: {esc(str(e))}</p>")
+
+    suggested_title, why = parse_title_suggestion(raw)
+
+    body_html = f"""
+      <h3>Title suggestion</h3>
+      {quota_note}
+      <p><strong>{esc(suggested_title)}</strong></p>
+      <p>{esc(why)}</p>
+      {outline_start_form(suggested_title)}
+    """
+    return page(body_html)
+
+
+@app.post("/video-inspiration", response_class=HTMLResponse)
+async def video_inspiration(video_url: str = Form(...)):
+    if not GEMINI_API_KEY:
+        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY.</p>")
+    if not YOUTUBE_API_KEY:
+        return page("<p style='color:#c0392b;'>Missing YOUTUBE_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
+
+    try:
+        video_id = extract_video_id(video_url)
+        metadata = get_video_metadata(video_id, YOUTUBE_API_KEY)
+    except Exception as e:
+        return page(f"<p style='color:#c0392b;'>Could not read that video: {esc(str(e))}</p>")
+
+    prompt = VIDEO_INSPIRATION_PROMPT_TEMPLATE.format(
+        source_title=metadata["title"],
+        source_description=metadata["description"][:500],
+        source_tags=", ".join(metadata["tags"][:15]),
+    )
+
+    try:
+        raw = call_gemini(prompt)
+    except Exception as e:
+        return page(f"<p style='color:#c0392b;'>Suggestion failed: {esc(str(e))}</p>")
+
+    suggested_title, why = parse_title_suggestion(raw)
+
+    body_html = f"""
+      <h3>Suggested angle (inspired by, not copied from, the source video)</h3>
+      <p><em>Source video: {esc(metadata['title'])}</em></p>
+      <p><strong>{esc(suggested_title)}</strong></p>
+      <p>{esc(why)}</p>
+      {outline_start_form(suggested_title)}
     """
     return page(body_html)
 
@@ -119,7 +259,14 @@ async def outline(topic: str = Form(...), length_minutes: str = Form("10")):
         return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
 
     word_target = int(float(length_minutes) * WORDS_PER_MINUTE)
-    prompt = OUTLINE_PROMPT_TEMPLATE.format(topic=topic, length_minutes=length_minutes, word_target=word_target)
+    techniques_text = "\n".join(f"- {desc}" for desc in PSYCHOLOGY_TECHNIQUES.values())
+    prompt = OUTLINE_PROMPT_TEMPLATE.format(
+        topic=topic,
+        length_minutes=length_minutes,
+        word_target=word_target,
+        structure=STRUCTURE_TEMPLATE,
+        techniques=techniques_text,
+    )
 
     try:
         outline_text = call_gemini(prompt)
