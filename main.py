@@ -9,6 +9,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from psychology import PSYCHOLOGY_TECHNIQUES
+from hooks_and_titling import TITLE_FRAMES, FRAME_STACKING_NOTE, HOOK_FRAMEWORK, REHOOK_TECHNIQUES
+from humanizing import BANNED_PHRASES, HUMANIZING_GUIDELINES, PACING_EXAMPLE
 from youtube_api import extract_video_id, get_video_metadata, search_current_titles, QuotaExceededError
 
 app = FastAPI()
@@ -35,12 +37,13 @@ VOICES = [
 # =============================================================================
 # VIDEO STRUCTURE
 # =============================================================================
-STRUCTURE_TEMPLATE = """1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines.
+STRUCTURE_TEMPLATE = """1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines, following the hook framework provided.
 2. Setup / Exposition (next ~10% of runtime) -- validate the viewer's current experience or struggle before introducing anything new, so they feel seen and stay with you.
-3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then".
-4. Climax -- where the macro open loop gets resolved.
-5. Payoff / Resolution -- the satisfying takeaway. This video should feel self-contained and fully resolved -- do not tease or open a loop for a future video.
-6. Outro / CTA -- a natural subscribe ask."""
+3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then". Pacing should be tighter (shorter beats, quicker turns) in the first third of the video, and more stabilized/explanatory in the middle third.
+4. Rehooks -- place a rehook (see rehook techniques provided) roughly every 2-3 minutes of runtime, especially right after any question or mini-stakes resolves. Never let a section end on a flat, comfortable note.
+5. Climax -- where the macro open loop gets resolved.
+6. Payoff / Resolution -- the satisfying takeaway. This video should feel self-contained and fully resolved -- do not tease or open a loop for a future video.
+7. Outro / CTA -- a natural subscribe ask."""
 
 OUTLINE_PROMPT_TEMPLATE = """You are a professional long-form YouTube scriptwriter and story architect. Plan the STRUCTURE for a video on this topic: "{topic}".
 
@@ -53,8 +56,16 @@ Output a structured beat sheet, NOT prose narration. Use this exact format, one 
 VIDEO STRUCTURE TO FOLLOW:
 {structure}
 
+HOOK FRAMEWORK (for the opening beat):
+{hook_framework}
+
+REHOOK TECHNIQUES (use a mix of these across the video, not just one repeated):
+{rehook_techniques}
+
 PSYCHOLOGICAL / STORYTELLING TECHNIQUES TO WEAVE IN (apply each one at the beat where it fits best):
 {techniques}
+
+These frameworks are inspiration and a foundation, not a rigid cage -- you have creative freedom to combine, adapt, or invent beyond them where it makes the video genuinely better, as long as the core structure and rules above are respected.
 
 Rules:
 - Do not write any actual narration text yet -- structural plan only.
@@ -69,20 +80,34 @@ Target spoken length: approximately {length_minutes} minutes (about {word_target
 APPROVED OUTLINE:
 {outline}
 
+WRITING STYLE GUIDELINES:
+{humanizing_guidelines}
+
+NEVER use any of these words/phrases (they are recognizable AI writing tells):
+{banned_phrases}
+
+{pacing_example}
+
 Write the full narration following this outline's structure and beats, in order. Rules:
 - Output ONLY the spoken narration text a narrator would read aloud -- no section headers, timestamps, labels, or stage directions.
 - Never include bracketed markers like [pause] or [beat] in the text -- edge-tts will read them aloud literally since it cannot process custom pause markup. Use punctuation (periods, ellipses, em dashes, short sentences) to create pacing and pauses instead.
 - Write it as one continuous piece, not a list of separate segments.
 - Use "But" and "therefore" (or natural equivalents) to connect ideas causally rather than "and then".
-- NEVER use story-structure or technique jargon inside the narration itself -- words like "open loop", "macro loop", "climax", "act", "beat", "pattern interrupt", or "foot-in-the-door" must never be spoken by the narrator. Execute the technique; don't name it.
+- NEVER use story-structure or technique jargon inside the narration itself -- words like "open loop", "macro loop", "climax", "act", "beat", "pattern interrupt", "rehook", or "foot-in-the-door" must never be spoken by the narrator. Execute the technique; don't name it.
 - Vary sentence pacing concretely: any sentence longer than about 25 words must be followed by one under about 10 words. Do not let more than two long sentences in a row pass without a short one breaking the rhythm.
 - Do not invent or cite specific named studies, researchers, or statistics -- use soft, generic attribution only for well-established ideas (e.g. "many psychologists point to...") and never fabricate a source.
-- Follow the outline's placement of the open loop resolution, the audience foot-in-the-door moment, and the CTA exactly as planned.
+- Follow the outline's placement of the open loop resolution, the audience foot-in-the-door moment, the rehooks, and the CTA exactly as planned.
+- You have creative freedom in wording and phrasing -- the frameworks above are inspiration for technique and rhythm, not scripts to imitate word-for-word.
 """
 
 TITLE_CHECK_PROMPT_TEMPLATE = """You are a YouTube title strategist. The creator wants to make a video about: "{topic}".
 
 {context_block}
+
+VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together for the strongest titles, but feel free to go beyond them if a better title occurs to you):
+{title_frames}
+
+{frame_stacking_note}
 
 Suggest ONE improved, currently-relevant title for this video. Then in one short paragraph, explain why this title works right now.
 
@@ -98,6 +123,11 @@ Description: {source_description}
 Tags: {source_tags}
 
 Using this ONLY as inspiration for the topic/angle (never copy its wording, claims, or structure), suggest an original title and topic for a NEW, different video the user could make on a related angle.
+
+VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together for the strongest titles, but feel free to go beyond them if a better title occurs to you):
+{title_frames}
+
+{frame_stacking_note}
 
 Format your answer exactly as:
 TITLE: <the suggested title>
@@ -198,7 +228,13 @@ async def check_title(topic: str = Form(...)):
     else:
         context_block = "No YouTube API key is configured -- use general best practice instead."
 
-    prompt = TITLE_CHECK_PROMPT_TEMPLATE.format(topic=topic, context_block=context_block)
+    title_frames_text = "\n".join(f"- {desc}" for desc in TITLE_FRAMES.values())
+    prompt = TITLE_CHECK_PROMPT_TEMPLATE.format(
+        topic=topic,
+        context_block=context_block,
+        title_frames=title_frames_text,
+        frame_stacking_note=FRAME_STACKING_NOTE,
+    )
 
     try:
         raw = call_gemini(prompt)
@@ -230,10 +266,13 @@ async def video_inspiration(video_url: str = Form(...)):
     except Exception as e:
         return page(f"<p style='color:#c0392b;'>Could not read that video: {esc(str(e))}</p>")
 
+    title_frames_text = "\n".join(f"- {desc}" for desc in TITLE_FRAMES.values())
     prompt = VIDEO_INSPIRATION_PROMPT_TEMPLATE.format(
         source_title=metadata["title"],
         source_description=metadata["description"][:500],
         source_tags=", ".join(metadata["tags"][:15]),
+        title_frames=title_frames_text,
+        frame_stacking_note=FRAME_STACKING_NOTE,
     )
 
     try:
@@ -259,12 +298,18 @@ async def outline(topic: str = Form(...), length_minutes: str = Form("10")):
         return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
 
     word_target = int(float(length_minutes) * WORDS_PER_MINUTE)
-    techniques_text = "\n".join(f"- {desc}" for desc in PSYCHOLOGY_TECHNIQUES.values())
+    techniques_text = "\n\n".join(
+        f"- {t['name']}: {t['explanation']} Example: {t['example']}"
+        for t in PSYCHOLOGY_TECHNIQUES.values()
+    )
+    rehook_text = "\n".join(f"- {desc}" for desc in REHOOK_TECHNIQUES.values())
     prompt = OUTLINE_PROMPT_TEMPLATE.format(
         topic=topic,
         length_minutes=length_minutes,
         word_target=word_target,
         structure=STRUCTURE_TEMPLATE,
+        hook_framework=HOOK_FRAMEWORK,
+        rehook_techniques=rehook_text,
         techniques=techniques_text,
     )
 
@@ -293,7 +338,15 @@ async def script(topic: str = Form(...), length_minutes: str = Form("10"), outli
         return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
 
     word_target = int(float(length_minutes) * WORDS_PER_MINUTE)
-    prompt = SCRIPT_PROMPT_TEMPLATE.format(topic=topic, length_minutes=length_minutes, word_target=word_target, outline=outline)
+    prompt = SCRIPT_PROMPT_TEMPLATE.format(
+        topic=topic,
+        length_minutes=length_minutes,
+        word_target=word_target,
+        outline=outline,
+        humanizing_guidelines=HUMANIZING_GUIDELINES,
+        banned_phrases=", ".join(BANNED_PHRASES),
+        pacing_example=PACING_EXAMPLE,
+    )
 
     try:
         script_text = call_gemini(prompt)
