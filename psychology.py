@@ -45,8 +45,8 @@ PSYCHOLOGY_TECHNIQUES = {
 
     "foot_in_the_door_audience": {
         "name": "Foot-in-the-Door (Audience)",
-        "explanation": "Place one small, low-friction ask of the viewer roughly two-thirds through -- a small 'yes' primes them to say yes to the bigger subscribe ask at the end.",
-        "example": "\"Comment 'yes' if you've felt this exact thing happen to you.\"",
+        "explanation": "Place one small, low-friction ask of the viewer roughly two-thirds through -- a small 'yes' primes them to say yes to the bigger subscribe ask at the end. Place it at a natural pause between sections, never during the emotional climax or a tense beat -- interrupting the most gripping moment to ask for a comment breaks immersion right when it matters most.",
+        "example": "\"Comment 'yes' if you've felt this exact thing happen to you.\" (placed as its own beat between two sections, not dropped into the middle of the climax)",
     },
 
     "self_verification_theory": {
