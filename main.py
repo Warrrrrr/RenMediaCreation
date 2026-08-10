@@ -92,7 +92,7 @@ Write the full narration following this outline's structure and beats, in order.
 - Output ONLY the spoken narration text a narrator would read aloud -- no section headers, timestamps, labels, or stage directions.
 - Never include bracketed markers like [pause] or [beat] in the text -- edge-tts will read them aloud literally since it cannot process custom pause markup. Use punctuation (periods, ellipses, em dashes, short sentences) to create pacing and pauses instead.
 - Write it as one continuous piece, not a list of separate segments.
-- Use "But" and "therefore" (or natural equivalents) to connect ideas causally rather than "and then".
+- Connect ideas causally the way Parker/Stone's "But/Therefore" rule describes -- but this is a rule about HOW ideas relate (cause leads to complication leads to consequence), not a requirement to literally say the words "but" or "therefore" over and over. Saying "therefore" repeatedly out loud sounds like an academic lecture, not a video. Often imply the causal link through the actions/consequences themselves with no connector word at all; use "but" occasionally; use the literal word "therefore" rarely, if ever.
 - NEVER use story-structure or technique jargon inside the narration itself -- words like "open loop", "macro loop", "climax", "act", "beat", "pattern interrupt", "rehook", or "foot-in-the-door" must never be spoken by the narrator. Execute the technique; don't name it.
 - Vary sentence pacing concretely: any sentence longer than about 25 words must be followed by one under about 10 words. Do not let more than two long sentences in a row pass without a short one breaking the rhythm.
 - Do not invent or cite specific named studies, researchers, or statistics -- use soft, generic attribution only for well-established ideas (e.g. "many psychologists point to...") and never fabricate a source.
@@ -150,10 +150,26 @@ def page(body_html: str) -> str:
     <head>
       <title>Script + Voiceover Generator</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
+      <style>
+        #loading-overlay {{
+          display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+          background:rgba(255,255,255,0.95); z-index:9999; text-align:center;
+          padding-top:35vh; font-size:18px; font-family:sans-serif;
+        }}
+      </style>
     </head>
     <body style="font-family:sans-serif; max-width:600px; margin:20px auto; padding:0 12px;">
+      <div id="loading-overlay">Generating&hellip;<br><small>This can take up to a minute. Please don't close this tab.</small></div>
       <h2>Script + Voiceover Generator</h2>
       {body_html}
+      <script>
+        document.querySelectorAll('form').forEach(function(f) {{
+          f.addEventListener('submit', function() {{
+            document.getElementById('loading-overlay').style.display = 'block';
+            f.querySelectorAll('button[type=submit]').forEach(function(b) {{ b.disabled = true; }});
+          }});
+        }});
+      </script>
     </body>
     </html>
     """
