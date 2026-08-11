@@ -108,5 +108,18 @@ PSYCHOLOGY_TECHNIQUES = {
         "example": "\"This pattern shows up constantly, in relationship after relationship\" -- not \"87% of women reported...\" unless that statistic is real and verifiable.",
     },
 
+    "point_development": {
+        "name": "Full Point Development (Context / Application / Framing)",
+        "explanation": "Never state a point and move straight to the next one -- that's what makes a script feel rushed even when it's long. Develop every point in three parts: Context (what it is, plainly), Application (how it actually plays out, with one concrete example), and Framing (why it matters / how it connects to the bigger argument). Only move on once all three are present.",
+        "example": "Not just \"women test emotional stability and move on\" -- Context: \"there's a subconscious safety test running underneath every date.\" Application: \"it shows up as something as small as staying quiet for three seconds.\" Framing: \"because passing it is what answers the one question that decides partner versus friend.\"",
+    },
+
+    "point_ordering": {
+        "name": "Point Ordering (Second-Best First)",
+        "explanation": "When a section has multiple sequential points or examples, don't open with the single strongest one -- lead with the second-strongest, so the next point feels like an escalation instead of a letdown. This creates a rising pattern instead of one that peaks early and coasts.",
+        "example": "With three supporting examples of an idea, order them strong, strongest, then a lighter closing one that ties everything together -- never strongest first.",
+    },
+
+
     # Add new techniques below this line:
 }
