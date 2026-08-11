@@ -39,7 +39,7 @@ VOICES = [
 # =============================================================================
 STRUCTURE_TEMPLATE = """1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines, following the hook framework provided.
 2. Setup / Exposition (next ~10% of runtime) -- validate the viewer's current experience or struggle before introducing anything new, so they feel seen and stay with you.
-3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then". Pacing should be tighter (shorter beats, quicker turns) in the first third of the video, and more stabilized/explanatory in the middle third.
+3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then". Pacing should be tighter (shorter beats, quicker turns) in the first third of the video, and more stabilized/explanatory in the middle third. Fully develop each point using the point-development technique provided (Context/Application/Framing) before moving to the next -- do not list points and rush past them. Where a section has multiple sequential examples, order them second-strongest first (see point-ordering technique).
 4. Rehooks -- place a rehook (see rehook techniques provided) roughly every 2-3 minutes of runtime, especially right after any question or mini-stakes resolves. Never let a section end on a flat, comfortable note.
 5. Climax -- where the macro open loop gets resolved.
 6. Payoff / Resolution -- the satisfying takeaway. This video should feel self-contained and fully resolved -- do not tease or open a loop for a future video.
@@ -97,6 +97,7 @@ Write the full narration following this outline's structure and beats, in order.
 - Vary sentence pacing concretely: any sentence longer than about 25 words must be followed by one under about 10 words. Do not let more than two long sentences in a row pass without a short one breaking the rhythm.
 - Do not invent or cite specific named studies, researchers, or statistics -- use soft, generic attribution only for well-established ideas (e.g. "many psychologists point to...") and never fabricate a source.
 - Follow the outline's placement of the open loop resolution, the audience foot-in-the-door moment, the rehooks, and the CTA exactly as planned.
+- Stay within about 10% of the target word count above. If the outline has too much material to develop properly within that limit, cut or shorten a lower-priority beat entirely rather than compressing every point equally -- a slightly shorter script where each point is fully developed beats a longer one that rushes through everything.
 - You have creative freedom in wording and phrasing -- the frameworks above are inspiration for technique and rhythm, not scripts to imitate word-for-word.
 """
 
@@ -108,6 +109,10 @@ VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together
 {title_frames}
 
 {frame_stacking_note}
+
+CRITICAL RULE: Never invent a personal credential, years of experience, client count, or professional tenure for the creator (for example "After 10 years of coaching..."). The creator has not supplied any such credential, and inventing one is a false claim in their own voice -- not a stylistic choice. If a title idea would need a credential to work, use a different frame instead.
+
+Output the title as plain text only -- no markdown formatting, no surrounding quotation marks, and no parenthetical asides tacked onto the end.
 
 Suggest ONE improved, currently-relevant title for this video. Then in one short paragraph, explain why this title works right now.
 
@@ -128,6 +133,10 @@ VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together
 {title_frames}
 
 {frame_stacking_note}
+
+CRITICAL RULE: Never invent a personal credential, years of experience, client count, or professional tenure for the creator (for example "After 10 years of coaching..."). The creator has not supplied any such credential, and inventing one is a false claim in their own voice -- not a stylistic choice. If a title idea would need a credential to work, use a different frame instead.
+
+Output the title as plain text only -- no markdown formatting, no surrounding quotation marks, and no parenthetical asides tacked onto the end.
 
 Format your answer exactly as:
 TITLE: <the suggested title>
@@ -198,7 +207,19 @@ def parse_title_suggestion(raw_text: str) -> tuple:
     why_match = re.search(r"WHY:\s*(.+)", raw_text, re.DOTALL)
     title = title_match.group(1).strip() if title_match else raw_text.strip()
     why = why_match.group(1).strip() if why_match else ""
+    title = clean_title_text(title)
     return title, why
+
+
+def clean_title_text(title: str) -> str:
+    """Safety net for stray formatting the model sometimes leaves in --
+    surrounding quotes, markdown bold, or an unmatched trailing bracket."""
+    title = title.strip().strip('"').strip("*").strip()
+    if title.count(")") > title.count("("):
+        title = title.rstrip(")").rstrip()
+    if title.count("]") > title.count("["):
+        title = title.rstrip("]").rstrip()
+    return title
 
 
 @app.get("/", response_class=HTMLResponse)
