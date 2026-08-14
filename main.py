@@ -2,16 +2,47 @@ import os
 import re
 import time
 import html
+import json
+import inspect
+import importlib
 import requests
 import edge_tts
+
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from psychology import PSYCHOLOGY_TECHNIQUES
-from hooks_and_titling import TITLE_FRAMES, FRAME_STACKING_NOTE, HOOK_FRAMEWORK, REHOOK_TECHNIQUES
-from humanizing import BANNED_PHRASES, HUMANIZING_GUIDELINES, PACING_EXAMPLE
-from youtube_api import extract_video_id, get_video_metadata, search_current_titles, QuotaExceededError
+from hooks_and_titling import (
+    TITLE_FRAMES,
+    FRAME_STACKING_NOTE,
+    HOOK_FRAMEWORK,
+    REHOOK_TECHNIQUES,
+)
+from humanizing import (
+    BANNED_PHRASES,
+    HUMANIZING_GUIDELINES,
+    PACING_EXAMPLE,
+)
+from youtube_api import (
+    extract_video_id,
+    get_video_metadata,
+    search_current_titles,
+    QuotaExceededError,
+)
+
+# =============================================================================
+# V2 MODULES
+# =============================================================================
+
+strategies_module = importlib.import_module("strategies")
+strategy_engine_module = importlib.import_module("strategy_engine")
+governance_module = importlib.import_module("governance")
+validator_module = importlib.import_module("validator")
+
+
+# =============================================================================
+# APP
+# =============================================================================
 
 app = FastAPI()
 
@@ -21,7 +52,11 @@ app.mount("/audio", StaticFiles(directory=AUDIO_DIR), name="audio")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/"
+    "v1beta/models/gemini-3.5-flash:generateContent"
+)
 
 WORDS_PER_MINUTE = 150
 
@@ -34,239 +69,972 @@ VOICES = [
     ("en-ZA-LeahNeural", "Leah (South African female)"),
 ]
 
+
+# =============================================================================
+# V2 COMPATIBILITY LAYER
+#
+# Purpose:
+# The new modules are independent knowledge/logic modules.
+# This layer prevents main.py from assuming one particular function name.
+# =============================================================================
+
+def _module_callable(module, preferred_names):
+    for name in preferred_names:
+        fn = getattr(module, name, None)
+        if callable(fn):
+            return fn
+
+    return None
+
+
+def _call_flexible(fn, values):
+    """
+    Call a function using only arguments its signature accepts.
+
+    This lets the integration work with slightly different but compatible
+    function signatures without changing the underlying V2 modules.
+    """
+    if fn is None:
+        return None
+
+    try:
+        sig = inspect.signature(fn)
+    except Exception:
+        return fn(**values)
+
+    kwargs = {}
+
+    for name, parameter in sig.parameters.items():
+        if parameter.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+
+        if name in values:
+            kwargs[name] = values[name]
+
+    try:
+        return fn(**kwargs)
+    except TypeError:
+        # Some implementations may use positional parameters.
+        positional = []
+
+        for name, parameter in sig.parameters.items():
+            if parameter.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
+
+            if name in values:
+                positional.append(values[name])
+
+        return fn(*positional)
+
+
+def _json_safe(value):
+    try:
+        return json.dumps(value, indent=2, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
+# =============================================================================
+# STRATEGY ENGINE ADAPTER
+# =============================================================================
+
+def select_strategy_map(topic, audience="", objective="", length_minutes=10):
+    fn = _module_callable(
+        strategy_engine_module,
+        [
+            "select_strategies",
+            "build_strategy_map",
+            "generate_strategy_map",
+            "choose_strategies",
+            "select_strategy_map",
+        ],
+    )
+
+    if fn is None:
+        raise RuntimeError(
+            "strategy_engine.py does not expose a recognized strategy-selection "
+            "function."
+        )
+
+    values = {
+        "topic": topic,
+        "audience": audience,
+        "likely_audience": audience,
+        "objective": objective,
+        "video_objective": objective,
+        "length_minutes": length_minutes,
+        "duration_minutes": length_minutes,
+        "video_length": length_minutes,
+    }
+
+    result = _call_flexible(fn, values)
+
+    if result is None:
+        raise RuntimeError("The strategy engine returned no strategy map.")
+
+    return result
+
+
+# =============================================================================
+# GOVERNANCE ADAPTER
+# =============================================================================
+
+def get_governance_text(strategy_map=None):
+    """
+    Governance is authoritative rules.
+
+    We intentionally do not duplicate those rules inside main.py.
+    """
+
+    candidates = [
+        "get_governance",
+        "build_governance",
+        "get_rules",
+        "GOVERNANCE",
+        "GOVERNANCE_RULES",
+        "RULES",
+    ]
+
+    for name in candidates:
+        obj = getattr(governance_module, name, None)
+
+        if callable(obj):
+            try:
+                result = _call_flexible(
+                    obj,
+                    {
+                        "strategy_map": strategy_map,
+                        "strategies": strategy_map,
+                    },
+                )
+                if result is not None:
+                    return _json_safe(result)
+            except Exception:
+                continue
+
+        elif obj is not None:
+            return _json_safe(obj)
+
+    # We do not invent governance rules if the module exposes a different API.
+    return (
+        "Governance rules are defined in governance.py. "
+        "Apply all applicable rules from that module."
+    )
+
+
+# =============================================================================
+# VALIDATOR ADAPTER
+# =============================================================================
+
+def validate_generated_script(
+    script_text,
+    topic,
+    outline,
+    strategy_map,
+    length_minutes,
+):
+    fn = _module_callable(
+        validator_module,
+        [
+            "validate_script",
+            "validate",
+            "run_validation",
+            "run_validator",
+            "check_script",
+        ],
+    )
+
+    if fn is None:
+        raise RuntimeError(
+            "validator.py does not expose a recognized validation function."
+        )
+
+    governance_text = get_governance_text(strategy_map)
+
+    values = {
+        "script": script_text,
+        "script_text": script_text,
+        "topic": topic,
+        "outline": outline,
+        "approved_outline": outline,
+        "strategy_map": strategy_map,
+        "strategies": strategy_map,
+        "governance": governance_text,
+        "governance_rules": governance_text,
+        "length_minutes": length_minutes,
+        "target_minutes": length_minutes,
+    }
+
+    result = _call_flexible(fn, values)
+
+    if result is None:
+        raise RuntimeError("The validator returned no result.")
+
+    return result
+
+
+# =============================================================================
+# GENERIC TEXT CONVERSION FOR V2 OUTPUT
+# =============================================================================
+
+def result_to_text(result):
+    if isinstance(result, str):
+        return result
+
+    if isinstance(result, dict):
+        return _json_safe(result)
+
+    if isinstance(result, list):
+        return _json_safe(result)
+
+    return str(result)
+
+
+def validation_status(validation):
+    """
+    Tries to understand common validator result formats without altering
+    validator.py itself.
+    """
+
+    if isinstance(validation, dict):
+        status = str(
+            validation.get("status")
+            or validation.get("overall_status")
+            or validation.get("result")
+            or ""
+        ).upper()
+
+        if status in {"CRITICAL", "FAIL", "FAILED", "BLOCK"}:
+            return "CRITICAL"
+
+        criticals = (
+            validation.get("critical")
+            or validation.get("criticals")
+            or validation.get("critical_failures")
+            or validation.get("errors")
+        )
+
+        if isinstance(criticals, list) and len(criticals) > 0:
+            return "CRITICAL"
+
+        if validation.get("passed") is False:
+            return "CRITICAL"
+
+        return "PASS"
+
+    text = str(validation).upper()
+
+    if "CRITICAL" in text and (
+        "FAIL" in text
+        or "BLOCK" in text
+        or "FAILURE" in text
+    ):
+        return "CRITICAL"
+
+    return "PASS"
+
+
 # =============================================================================
 # VIDEO STRUCTURE
 # =============================================================================
-STRUCTURE_TEMPLATE = """1. Cold Open / Hook (roughly first 5% of runtime) -- create a curiosity gap in the first two lines, following the hook framework provided.
-2. Setup / Exposition (next ~10% of runtime) -- validate the viewer's current experience or struggle before introducing anything new, so they feel seen and stay with you.
-3. Four to six escalating Acts/Sections -- each section builds on the previous one using "But" / "Therefore" causal logic, not "and then". Pacing should be tighter (shorter beats, quicker turns) in the first third of the video, and more stabilized/explanatory in the middle third. Fully develop each point using the point-development technique provided (Context/Application/Framing) before moving to the next -- do not list points and rush past them. Where a section has multiple sequential examples, order them second-strongest first (see point-ordering technique).
-4. Rehooks -- place a rehook (see rehook techniques provided) roughly every 2-3 minutes of runtime, especially right after any question or mini-stakes resolves. Never let a section end on a flat, comfortable note.
-5. Climax -- where the macro open loop gets resolved.
-6. Payoff / Resolution -- the satisfying takeaway. This video should feel self-contained and fully resolved -- do not tease or open a loop for a future video.
-7. Outro / CTA -- a natural subscribe ask."""
 
-OUTLINE_PROMPT_TEMPLATE = """You are a professional long-form YouTube scriptwriter and story architect. Plan the STRUCTURE for a video on this topic: "{topic}".
+STRUCTURE_TEMPLATE = """
+1. Cold Open / Hook
+   Establish the central curiosity immediately.
+   Do not manufacture evidence or credentials.
 
-Target spoken length: approximately {length_minutes} minutes (about {word_target} words of narration).
+2. Setup
+   Establish the viewer's problem, situation or question.
+   Make the viewer recognize themselves without unnecessary repetition.
 
-Output a structured beat sheet, NOT prose narration. Use this exact format, one beat per line:
+3. Core Sections
+   Use approximately four to six substantial sections depending on runtime.
+   Each section must have a clear job.
+   Develop the point before moving on.
+   Use causal progression rather than a sequence of unrelated observations.
 
-[SECTION NAME] -- Purpose/content of this beat (1-3 sentences describing what happens and which technique it uses)
+4. Rehooks
+   Use only where they serve retention.
+   Do not mechanically insert them every fixed number of minutes.
 
-VIDEO STRUCTURE TO FOLLOW:
-{structure}
+5. Climax / Central Resolution
+   Resolve the main question or tension created by the opening.
 
-HOOK FRAMEWORK (for the opening beat):
-{hook_framework}
+6. Payoff
+   Give the viewer the promised understanding or practical takeaway.
 
-REHOOK TECHNIQUES (use a mix of these across the video, not just one repeated):
-{rehook_techniques}
-
-PSYCHOLOGICAL / STORYTELLING TECHNIQUES TO WEAVE IN (apply each one at the beat where it fits best):
-{techniques}
-
-These frameworks are inspiration and a foundation, not a rigid cage -- you have creative freedom to combine, adapt, or invent beyond them where it makes the video genuinely better, as long as the core structure and rules above are respected.
-
-Rules:
-- Do not write any actual narration text yet -- structural plan only.
-- Do not invent or reference specific named studies, researchers, or statistics -- describe psychological techniques generically without fabricating sources.
-- Keep each beat description concise.
+7. Outro / CTA
+   Keep the CTA natural.
+   Do not interrupt an unresolved high-tension moment.
 """
 
-SCRIPT_PROMPT_TEMPLATE = """You are a professional long-form YouTube scriptwriter. Expand the following APPROVED beat outline into a complete voiceover narration script for a video on: "{topic}".
 
-Target spoken length: approximately {length_minutes} minutes (about {word_target} words).
+# =============================================================================
+# V2 OUTLINE PROMPT
+# =============================================================================
+
+OUTLINE_PROMPT_TEMPLATE = """
+You are the planning layer of a professional long-form YouTube writing system.
+
+You are NOT writing the final script.
+
+Create a precise, editable beat plan for:
+
+TITLE / TOPIC:
+{topic}
+
+TARGET LENGTH:
+{length_minutes} minutes
+Approximately {word_target} spoken words.
+
+APPROVED STRATEGY MAP:
+{strategy_map}
+
+GOVERNANCE:
+{governance}
+
+STRUCTURE:
+{structure}
+
+HOOK FRAMEWORK:
+{hook_framework}
+
+REHOOK OPTIONS:
+{rehook_techniques}
+
+The strategy map is authoritative.
+
+Do NOT introduce unrelated psychological techniques simply because you know them.
+
+Each strategy must have a specific job.
+
+For every beat include:
+
+[BEAT]
+Purpose:
+Viewer state:
+Content:
+Strategy:
+Open loop action:
+Payoff / closure:
+Transition:
+
+Rules:
+
+- This is a plan, not narration.
+- Do not fabricate studies, statistics, researchers, credentials or personal experiences.
+- Do not treat psychological terminology as decoration.
+- Do not force every strategy into the video.
+- Do not create unnecessary open loops.
+- Every open loop must have a planned payoff.
+- Do not design a CTA that interrupts unresolved narrative tension.
+- The final plan must be realistically executable within the target length.
+"""
+
+
+# =============================================================================
+# V2 SCRIPT PROMPT
+# =============================================================================
+
+SCRIPT_PROMPT_TEMPLATE = """
+You are the execution layer of a professional long-form YouTube writing system.
+
+Write the complete spoken narration using ONLY the APPROVED OUTLINE below.
+
+TOPIC:
+{topic}
+
+TARGET:
+{length_minutes} minutes
+Approximately {word_target} words.
+
+APPROVED STRATEGY MAP:
+{strategy_map}
 
 APPROVED OUTLINE:
 {outline}
 
-WRITING STYLE GUIDELINES:
+GOVERNANCE:
+{governance}
+
+HUMANIZING GUIDELINES:
 {humanizing_guidelines}
 
-NEVER use any of these words/phrases (they are recognizable AI writing tells):
+BANNED AI-LIKE PHRASES:
 {banned_phrases}
 
+PACING REFERENCE:
 {pacing_example}
 
-Write the full narration following this outline's structure and beats, in order. Rules:
-- Output ONLY the spoken narration text a narrator would read aloud -- no section headers, timestamps, labels, or stage directions.
-- Never include bracketed markers like [pause] or [beat] in the text -- edge-tts will read them aloud literally since it cannot process custom pause markup. Use punctuation (periods, ellipses, em dashes, short sentences) to create pacing and pauses instead.
-- Write it as one continuous piece, not a list of separate segments.
-- Connect ideas causally the way Parker/Stone's "But/Therefore" rule describes -- but this is a rule about HOW ideas relate (cause leads to complication leads to consequence), not a requirement to literally say the words "but" or "therefore" over and over. Saying "therefore" repeatedly out loud sounds like an academic lecture, not a video. Often imply the causal link through the actions/consequences themselves with no connector word at all; use "but" occasionally; use the literal word "therefore" rarely, if ever.
-- NEVER use story-structure or technique jargon inside the narration itself -- words like "open loop", "macro loop", "climax", "act", "beat", "pattern interrupt", "rehook", or "foot-in-the-door" must never be spoken by the narrator. Execute the technique; don't name it.
-- Vary sentence pacing concretely: any sentence longer than about 25 words must be followed by one under about 10 words. Do not let more than two long sentences in a row pass without a short one breaking the rhythm.
-- Do not invent or cite specific named studies, researchers, or statistics -- use soft, generic attribution only for well-established ideas (e.g. "many psychologists point to...") and never fabricate a source.
-- Follow the outline's placement of the open loop resolution, the audience foot-in-the-door moment, the rehooks, and the CTA exactly as planned.
-- Stay within about 10% of the target word count above. If the outline has too much material to develop properly within that limit, cut or shorten a lower-priority beat entirely rather than compressing every point equally -- a slightly shorter script where each point is fully developed beats a longer one that rushes through everything.
-- You have creative freedom in wording and phrasing -- the frameworks above are inspiration for technique and rhythm, not scripts to imitate word-for-word.
+CORE RULE:
+
+Execute the approved plan.
+Do not redesign the video.
+
+Do not add major sections that aren't in the outline.
+Do not remove major beats unless necessary to stay within the target length.
+
+PERSONAL EXPERIENCE:
+
+Never invent first-person memories, credentials, professional history,
+client experiences or personal anecdotes for the creator.
+
+Do not write things such as:
+
+"I remember when..."
+"I used to..."
+"In my years of..."
+"I learned this the hard way..."
+
+unless that experience was explicitly supplied by the creator.
+
+EVIDENCE:
+
+Never invent studies, researchers, statistics or precise scientific findings.
+
+If a claim cannot safely be supported from the supplied material,
+calibrate the language rather than manufacturing certainty.
+
+PSYCHOLOGY:
+
+Use psychological concepts only when they improve viewer understanding.
+
+Do not name a psychological effect simply to make the script sound
+scientific.
+
+STYLE:
+
+Write naturally.
+
+Use contractions.
+
+Avoid robotic transitions.
+
+Avoid repetitive rhetorical structures.
+
+Do not repeatedly use the same sentence pattern.
+
+Do not sound like an academic paper.
+
+Do not announce the techniques being used.
+
+Never say:
+
+"open loop"
+"rehook"
+"climax"
+"beat"
+"pattern interrupt"
+"foot-in-the-door"
+"strategy map"
+
+or other internal production terminology.
+
+PACING:
+
+Vary sentence length.
+
+Use short sentences for emphasis.
+
+Allow longer sentences when the thought genuinely requires them.
+
+Do not mechanically force every sentence into a fixed length.
+
+The narration should sound natural when spoken aloud.
+
+OUTPUT:
+
+Return ONLY the narration.
+
+No title.
+No headings.
+No notes.
+No analysis.
+No production instructions.
 """
 
-TITLE_CHECK_PROMPT_TEMPLATE = """You are a YouTube title strategist. The creator wants to make a video about: "{topic}".
 
+# =============================================================================
+# TITLE ANALYSIS PROMPT
+# =============================================================================
+
+ANALYZE_PROMPT_TEMPLATE = """
+You are the analysis layer of a YouTube content system.
+
+The creator supplied:
+
+TOPIC:
+{topic}
+
+CURRENT TITLE / TOPIC:
+{topic}
+
+LIVE YOUTUBE CONTEXT:
 {context_block}
 
-VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together for the strongest titles, but feel free to go beyond them if a better title occurs to you):
+TITLE TOOLKIT:
 {title_frames}
 
 {frame_stacking_note}
 
-CRITICAL RULE: Never invent a personal credential, years of experience, client count, or professional tenure for the creator (for example "After 10 years of coaching..."). The creator has not supplied any such credential, and inventing one is a false claim in their own voice -- not a stylistic choice. If a title idea would need a credential to work, use a different frame instead.
+Analyse whether the current title/topic gives the video a strong,
+clear and compelling promise.
 
-Output the title as plain text only -- no markdown formatting, no surrounding quotation marks, and no parenthetical asides tacked onto the end.
+Do NOT use fake numerical "viral scores".
 
-Suggest ONE improved, currently-relevant title for this video. Then in one short paragraph, explain why this title works right now.
+Do NOT claim that a title is guaranteed to go viral.
 
-Format your answer exactly as:
-TITLE: <the suggested title>
-WHY: <short explanation>
+Do NOT invent credentials, experience, clients or authority for the creator.
+
+Return exactly:
+
+ASSESSMENT:
+What is already strong.
+
+WEAKNESSES:
+What is unclear, generic, weak or potentially misleading.
+
+RECOMMENDATION:
+KEEP, EDIT, or REPLACE.
+
+OPTIMIZED TITLE:
+One improved title if improvement is necessary.
+If the original is already strong, return the original.
+
+WHY:
+A concise explanation.
+
+AUDIENCE:
+Likely audience.
+
+CORE PROMISE:
+What the viewer expects to receive.
+
+CURIOSITY ANGLE:
+What unanswered question makes the viewer want to continue.
 """
 
-VIDEO_INSPIRATION_PROMPT_TEMPLATE = """You are a YouTube content strategist. Another creator published a video with this public metadata:
 
-Title: {source_title}
-Description: {source_description}
-Tags: {source_tags}
+# =============================================================================
+# VIDEO INSPIRATION PROMPT
+# =============================================================================
 
-Using this ONLY as inspiration for the topic/angle (never copy its wording, claims, or structure), suggest an original title and topic for a NEW, different video the user could make on a related angle.
+VIDEO_INSPIRATION_PROMPT_TEMPLATE = """
+You are a YouTube content strategist.
 
-VIRAL TITLE FRAMES (for reference and inspiration -- stack 2-4 of these together for the strongest titles, but feel free to go beyond them if a better title occurs to you):
+A public YouTube video was supplied only as inspiration.
+
+SOURCE TITLE:
+{source_title}
+
+SOURCE DESCRIPTION:
+{source_description}
+
+SOURCE TAGS:
+{source_tags}
+
+Create a genuinely different topic and title.
+
+Do NOT copy the source's wording, structure, claims or distinctive phrasing.
+
+TITLE FRAMES:
 {title_frames}
 
 {frame_stacking_note}
 
-CRITICAL RULE: Never invent a personal credential, years of experience, client count, or professional tenure for the creator (for example "After 10 years of coaching..."). The creator has not supplied any such credential, and inventing one is a false claim in their own voice -- not a stylistic choice. If a title idea would need a credential to work, use a different frame instead.
+Never invent creator credentials.
 
-Output the title as plain text only -- no markdown formatting, no surrounding quotation marks, and no parenthetical asides tacked onto the end.
+Return:
 
-Format your answer exactly as:
-TITLE: <the suggested title>
-WHY: <short explanation of the angle and how it differs from the source>
+TITLE:
+<new title>
+
+WHY:
+<why this is a distinct angle>
 """
 
+
+# =============================================================================
+# GEMINI
+# =============================================================================
 
 def call_gemini(prompt: str) -> str:
-    headers = {"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY}
-    body = {"contents": [{"parts": [{"text": prompt}]}]}
-    resp = requests.post(GEMINI_URL, headers=headers, json=body, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Missing GEMINI_API_KEY.")
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+    }
+
+    body = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = requests.post(
+        GEMINI_URL,
+        headers=headers,
+        json=body,
+        timeout=120,
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(
+            "Gemini returned an unexpected response."
+        )
+
+
+# =============================================================================
+# HTML
+# =============================================================================
+
+def esc(text: str) -> str:
+    return html.escape(str(text or ""))
 
 
 def page(body_html: str) -> str:
     return f"""
     <html>
     <head>
-      <title>Script + Voiceover Generator</title>
+      <title>Ren Media V2</title>
       <meta name="viewport" content="width=device-width, initial-scale=1">
+
       <style>
+        body {{
+          font-family: sans-serif;
+          max-width: 760px;
+          margin: 20px auto;
+          padding: 0 12px;
+          line-height: 1.5;
+        }}
+
+        textarea,
+        input,
+        select {{
+          box-sizing: border-box;
+          width: 100%;
+          padding: 10px;
+          font-size: 16px;
+        }}
+
+        textarea {{
+          min-height: 260px;
+        }}
+
+        button {{
+          padding: 12px 20px;
+          font-size: 16px;
+          cursor: pointer;
+        }}
+
+        .card {{
+          border: 1px solid #ddd;
+          border-radius: 10px;
+          padding: 16px;
+          margin: 14px 0;
+        }}
+
+        .critical {{
+          border-left: 5px solid #c0392b;
+          padding-left: 12px;
+        }}
+
+        .warning {{
+          border-left: 5px solid #f39c12;
+          padding-left: 12px;
+        }}
+
+        .pass {{
+          border-left: 5px solid #27ae60;
+          padding-left: 12px;
+        }}
+
+        .muted {{
+          color: #666;
+        }}
+
         #loading-overlay {{
-          display:none; position:fixed; top:0; left:0; width:100%; height:100%;
-          background:rgba(255,255,255,0.95); z-index:9999; text-align:center;
-          padding-top:35vh; font-size:18px; font-family:sans-serif;
+          display:none;
+          position:fixed;
+          top:0;
+          left:0;
+          width:100%;
+          height:100%;
+          background:rgba(255,255,255,0.96);
+          z-index:9999;
+          text-align:center;
+          padding-top:35vh;
+          font-size:18px;
         }}
       </style>
     </head>
-    <body style="font-family:sans-serif; max-width:600px; margin:20px auto; padding:0 12px;">
-      <div id="loading-overlay">Generating&hellip;<br><small>This can take up to a minute. Please don't close this tab.</small></div>
-      <h2>Script + Voiceover Generator</h2>
+
+    <body>
+
+      <div id="loading-overlay">
+        Working&hellip;
+        <br>
+        <small>Please don't close this tab.</small>
+      </div>
+
+      <h2>Ren Media V2</h2>
+
       {body_html}
+
       <script>
-        document.querySelectorAll('form').forEach(function(f) {{
-          f.addEventListener('submit', function() {{
-            document.getElementById('loading-overlay').style.display = 'block';
-            f.querySelectorAll('button[type=submit]').forEach(function(b) {{ b.disabled = true; }});
+        document.querySelectorAll('form').forEach(function(form) {{
+          form.addEventListener('submit', function() {{
+            const overlay =
+              document.getElementById('loading-overlay');
+
+            if (overlay) {{
+              overlay.style.display = 'block';
+            }}
+
+            form.querySelectorAll('button[type=submit]')
+              .forEach(function(button) {{
+                button.disabled = true;
+              }});
           }});
         }});
       </script>
+
     </body>
     </html>
     """
 
 
-def esc(text: str) -> str:
-    return html.escape(text or "")
+# =============================================================================
+# TITLE PARSING
+# =============================================================================
+
+def parse_title_analysis(raw_text):
+    fields = {
+        "ASSESSMENT": "",
+        "WEAKNESSES": "",
+        "RECOMMENDATION": "",
+        "OPTIMIZED TITLE": "",
+        "WHY": "",
+        "AUDIENCE": "",
+        "CORE PROMISE": "",
+        "CURIOSITY ANGLE": "",
+    }
+
+    current = None
+
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+
+        matched = False
+
+        for key in fields:
+            prefix = key + ":"
+
+            if stripped.upper().startswith(prefix):
+                current = key
+                fields[key] = stripped[len(prefix):].strip()
+                matched = True
+                break
+
+        if not matched and current:
+            fields[current] += (
+                ("\n" if fields[current] else "")
+                + stripped
+            )
+
+    if not fields["OPTIMIZED TITLE"]:
+        fields["OPTIMIZED TITLE"] = raw_text.strip()
+
+    return fields
 
 
-def outline_start_form(topic: str) -> str:
-    return f"""
-      <h3>Suggested topic/title</h3>
-      <p>Edit if needed, then continue to the outline stage.</p>
-      <form method="post" action="/outline">
-        <input name="topic" value="{esc(topic)}" style="width:100%;padding:8px;font-size:16px;" required><br><br>
-        <label>Target length (minutes)</label><br>
-        <input name="length_minutes" value="10" style="width:100%;padding:8px;font-size:16px;"><br><br>
-        <button type="submit" style="padding:10px 20px;font-size:16px;">Generate Outline</button>
-      </form>
-      <p><a href="/">&larr; Start over</a></p>
-    """
+def clean_title_text(title):
+    title = str(title or "").strip()
 
+    title = title.strip('"')
+    title = title.strip("*")
 
-def parse_title_suggestion(raw_text: str) -> tuple:
-    title_match = re.search(r"TITLE:\s*(.+)", raw_text)
-    why_match = re.search(r"WHY:\s*(.+)", raw_text, re.DOTALL)
-    title = title_match.group(1).strip() if title_match else raw_text.strip()
-    why = why_match.group(1).strip() if why_match else ""
-    title = clean_title_text(title)
-    return title, why
-
-
-def clean_title_text(title: str) -> str:
-    """Safety net for stray formatting the model sometimes leaves in --
-    surrounding quotes, markdown bold, or an unmatched trailing bracket."""
-    title = title.strip().strip('"').strip("*").strip()
     if title.count(")") > title.count("("):
         title = title.rstrip(")").rstrip()
+
     if title.count("]") > title.count("["):
         title = title.rstrip("]").rstrip()
+
     return title
 
 
+# =============================================================================
+# TITLE CONTEXT
+# =============================================================================
+
+def get_youtube_context(topic):
+    if not YOUTUBE_API_KEY:
+        return (
+            "No live YouTube search data is configured. "
+            "Use the title toolkit and general title principles."
+        ), ""
+
+    try:
+        results = search_current_titles(
+            topic,
+            YOUTUBE_API_KEY,
+            max_results=5,
+        )
+
+        if not results:
+            return (
+                "No current YouTube search data was found.",
+                "",
+            )
+
+        lines = "\n".join(
+            f"- {r['title']} "
+            f"({r['view_count']} views, "
+            f"published {r['published_at'][:10]})"
+            for r in results
+        )
+
+        return (
+            "Current YouTube search examples:\n" + lines,
+            "",
+        )
+
+    except QuotaExceededError:
+        return (
+            "Live YouTube search quota is unavailable. "
+            "Use the internal title toolkit instead.",
+            "<p class='muted'>Live YouTube search quota unavailable.</p>",
+        )
+
+    except Exception as exc:
+        return (
+            "Live YouTube search could not be completed. "
+            "Use the internal title toolkit instead.",
+            f"<p class='muted'>Live title search unavailable: {esc(exc)}</p>",
+        )
+
+
+# =============================================================================
+# HOME
+# =============================================================================
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
+
     body_html = """
-      <h3>Option 1 -- Start from a topic (checks what's currently working)</h3>
-      <form method="post" action="/check-title">
-        <input name="topic" placeholder="e.g. why women lose interest fast" style="width:100%;padding:8px;font-size:16px;" required><br><br>
-        <button type="submit" style="padding:10px 20px;font-size:16px;">Check Title</button>
-      </form>
-      <br>
-      <h3>Option 2 -- Start from a YouTube video (as inspiration only)</h3>
-      <form method="post" action="/video-inspiration">
-        <input name="video_url" placeholder="https://youtube.com/watch?v=..." style="width:100%;padding:8px;font-size:16px;" required><br><br>
-        <button type="submit" style="padding:10px 20px;font-size:16px;">Get Suggested Angle</button>
-      </form>
+      <div class="card">
+        <h3>Start a new video</h3>
+
+        <p class="muted">
+          Enter the topic or working title.
+          Ren Media will analyse it before planning the script.
+        </p>
+
+        <form method="post" action="/analyze">
+
+          <input
+            name="topic"
+            placeholder="e.g. why women lose interest fast"
+            required
+          >
+
+          <br><br>
+
+          <label>Target length in minutes</label>
+
+          <input
+            name="length_minutes"
+            value="10"
+            type="number"
+            min="1"
+            max="60"
+            step="1"
+            required
+          >
+
+          <br><br>
+
+          <button type="submit">
+            Analyze
+          </button>
+
+        </form>
+      </div>
+
+      <div class="card">
+
+        <h3>Use a YouTube video as inspiration</h3>
+
+        <form method="post" action="/video-inspiration">
+
+          <input
+            name="video_url"
+            placeholder="https://youtube.com/watch?v=..."
+            required
+          >
+
+          <br><br>
+
+          <button type="submit">
+            Find New Angle
+          </button>
+
+        </form>
+
+      </div>
     """
+
     return page(body_html)
 
 
-@app.post("/check-title", response_class=HTMLResponse)
-async def check_title(topic: str = Form(...)):
+# =============================================================================
+# ANALYZE
+# =============================================================================
+
+@app.post("/analyze", response_class=HTMLResponse)
+async def analyze(
+    topic: str = Form(...),
+    length_minutes: str = Form("10"),
+):
+
     if not GEMINI_API_KEY:
-        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY.</p>")
+        return page(
+            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+        )
 
-    context_block = ""
-    quota_note = ""
+    try:
+        length = int(float(length_minutes))
+    except ValueError:
+        length = 10
 
-    if YOUTUBE_API_KEY:
-        try:
-            results = search_current_titles(topic, YOUTUBE_API_KEY, max_results=5)
-            if results:
-                lines = "\n".join(
-                    f"- \"{r['title']}\" ({r['view_count']} views, published {r['published_at'][:10]})"
-                    for r in results
-                )
-                context_block = f"Here is what's currently ranking on this topic on YouTube:\n{lines}"
-            else:
-                context_block = "No current search data was found for this topic -- use general best practice instead."
-        except QuotaExceededError:
-            context_block = "No live search data is available right now (daily search budget used up) -- use general best practice instead."
-            quota_note = "<p><em>Note: today's search-based check budget is used up, so this suggestion is based on general best practice rather than live data.</em></p>"
-    else:
-        context_block = "No YouTube API key is configured -- use general best practice instead."
+    context_block, quota_note = get_youtube_context(topic)
 
-    title_frames_text = "\n".join(f"- {desc}" for desc in TITLE_FRAMES.values())
-    prompt = TITLE_CHECK_PROMPT_TEMPLATE.format(
+    title_frames_text = "\n".join(
+        f"- {desc}"
+        for desc in TITLE_FRAMES.values()
+    )
+
+    prompt = ANALYZE_PROMPT_TEMPLATE.format(
         topic=topic,
         context_block=context_block,
         title_frames=title_frames_text,
@@ -275,35 +1043,564 @@ async def check_title(topic: str = Form(...)):
 
     try:
         raw = call_gemini(prompt)
-    except Exception as e:
-        return page(f"<p style='color:#c0392b;'>Title check failed: {esc(str(e))}</p>")
+        analysis = parse_title_analysis(raw)
+    except Exception as exc:
+        return page(
+            f"<p class='critical'>Analysis failed: "
+            f"{esc(exc)}</p>"
+        )
 
-    suggested_title, why = parse_title_suggestion(raw)
+    optimized_title = clean_title_text(
+        analysis["OPTIMIZED TITLE"]
+    )
+
+    try:
+        strategy_map = select_strategy_map(
+            topic=optimized_title,
+            audience=analysis["AUDIENCE"],
+            objective=analysis["CORE PROMISE"],
+            length_minutes=length,
+        )
+    except Exception as exc:
+        return page(
+            f"""
+            <div class="critical">
+              <strong>Strategy engine error</strong>
+              <p>{esc(exc)}</p>
+            </div>
+            """
+        )
+
+    strategy_text = result_to_text(strategy_map)
 
     body_html = f"""
-      <h3>Title suggestion</h3>
+      <h3>1. Analyze</h3>
+
       {quota_note}
-      <p><strong>{esc(suggested_title)}</strong></p>
-      <p>{esc(why)}</p>
-      {outline_start_form(suggested_title)}
+
+      <div class="card">
+        <strong>Assessment</strong>
+        <p>{esc(analysis["ASSESSMENT"])}</p>
+      </div>
+
+      <div class="card">
+        <strong>Weaknesses</strong>
+        <p>{esc(analysis["WEAKNESSES"])}</p>
+      </div>
+
+      <div class="card">
+        <strong>Recommendation</strong>
+        <p>{esc(analysis["RECOMMENDATION"])}</p>
+      </div>
+
+      <form method="post" action="/strategy-map">
+
+        <label>
+          <strong>Optimized title</strong>
+        </label>
+
+        <input
+          name="topic"
+          value="{esc(optimized_title)}"
+          required
+        >
+
+        <br><br>
+
+        <label>
+          <strong>Audience</strong>
+        </label>
+
+        <input
+          name="audience"
+          value="{esc(analysis["AUDIENCE"])}"
+        >
+
+        <br><br>
+
+        <label>
+          <strong>Core promise</strong>
+        </label>
+
+        <textarea
+          name="objective"
+          rows="4"
+        >{esc(analysis["CORE PROMISE"])}</textarea>
+
+        <br><br>
+
+        <label>
+          <strong>Curiosity angle</strong>
+        </label>
+
+        <textarea
+          name="curiosity_angle"
+          rows="4"
+        >{esc(analysis["CURIOSITY ANGLE"])}</textarea>
+
+        <br><br>
+
+        <label>
+          <strong>Target length</strong>
+        </label>
+
+        <input
+          name="length_minutes"
+          value="{length}"
+          type="number"
+          min="1"
+          max="60"
+        >
+
+        <br><br>
+
+        <label>
+          <strong>Strategy map</strong>
+        </label>
+
+        <p class="muted">
+          This is editable. Remove strategies you don't want.
+          Add or modify them if necessary.
+        </p>
+
+        <textarea
+          name="strategy_map"
+          rows="20"
+        >{esc(strategy_text)}</textarea>
+
+        <br><br>
+
+        <button type="submit">
+          Approve &amp; Plan Script
+        </button>
+
+      </form>
+
+      <p>
+        <a href="/">&larr; Start over</a>
+      </p>
     """
+
     return page(body_html)
 
 
-@app.post("/video-inspiration", response_class=HTMLResponse)
-async def video_inspiration(video_url: str = Form(...)):
+# =============================================================================
+# STRATEGY MAP → OUTLINE
+# =============================================================================
+
+@app.post("/strategy-map", response_class=HTMLResponse)
+async def strategy_map(
+    topic: str = Form(...),
+    audience: str = Form(""),
+    objective: str = Form(""),
+    curiosity_angle: str = Form(""),
+    length_minutes: str = Form("10"),
+    strategy_map: str = Form(...),
+):
+
     if not GEMINI_API_KEY:
-        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY.</p>")
+        return page(
+            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+        )
+
+    try:
+        length = int(float(length_minutes))
+    except ValueError:
+        length = 10
+
+    word_target = int(length * WORDS_PER_MINUTE)
+
+    governance_text = get_governance_text(strategy_map)
+
+    rehook_text = "\n".join(
+        f"- {desc}"
+        for desc in REHOOK_TECHNIQUES.values()
+    )
+
+    prompt = OUTLINE_PROMPT_TEMPLATE.format(
+        topic=topic,
+        length_minutes=length,
+        word_target=word_target,
+        strategy_map=strategy_map,
+        governance=governance_text,
+        structure=STRUCTURE_TEMPLATE,
+        hook_framework=HOOK_FRAMEWORK,
+        rehook_techniques=rehook_text,
+    )
+
+    try:
+        outline_text = call_gemini(prompt)
+    except Exception as exc:
+        return page(
+            f"<p class='critical'>Outline generation failed: "
+            f"{esc(exc)}</p>"
+        )
+
+    body_html = f"""
+      <h3>2. Review / Edit Script Plan</h3>
+
+      <div class="card">
+
+        <p class="muted">
+          This is the approved architecture for the script.
+          Edit it before the prose is generated.
+        </p>
+
+        <form method="post" action="/script">
+
+          <input
+            type="hidden"
+            name="topic"
+            value="{esc(topic)}"
+          >
+
+          <input
+            type="hidden"
+            name="audience"
+            value="{esc(audience)}"
+          >
+
+          <input
+            type="hidden"
+            name="objective"
+            value="{esc(objective)}"
+          >
+
+          <input
+            type="hidden"
+            name="length_minutes"
+            value="{length}"
+          >
+
+          <input
+            type="hidden"
+            name="strategy_map"
+            value="{esc(strategy_map)}"
+          >
+
+          <textarea
+            name="outline"
+            rows="28"
+            required
+          >{esc(outline_text)}</textarea>
+
+          <br><br>
+
+          <button type="submit">
+            Generate Script
+          </button>
+
+        </form>
+
+      </div>
+
+      <p>
+        <a href="/">&larr; Start over</a>
+      </p>
+    """
+
+    return page(body_html)
+
+
+# =============================================================================
+# SCRIPT GENERATION
+# =============================================================================
+
+@app.post("/script", response_class=HTMLResponse)
+async def script(
+    topic: str = Form(...),
+    audience: str = Form(""),
+    objective: str = Form(""),
+    length_minutes: str = Form("10"),
+    strategy_map: str = Form(...),
+    outline: str = Form(...),
+):
+
+    if not GEMINI_API_KEY:
+        return page(
+            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+        )
+
+    try:
+        length = int(float(length_minutes))
+    except ValueError:
+        length = 10
+
+    word_target = int(length * WORDS_PER_MINUTE)
+
+    governance_text = get_governance_text(strategy_map)
+
+    prompt = SCRIPT_PROMPT_TEMPLATE.format(
+        topic=topic,
+        length_minutes=length,
+        word_target=word_target,
+        strategy_map=strategy_map,
+        outline=outline,
+        governance=governance_text,
+        humanizing_guidelines=HUMANIZING_GUIDELINES,
+        banned_phrases=", ".join(BANNED_PHRASES),
+        pacing_example=PACING_EXAMPLE,
+    )
+
+    try:
+        script_text = call_gemini(prompt)
+    except Exception as exc:
+        return page(
+            f"<p class='critical'>Script generation failed: "
+            f"{esc(exc)}</p>"
+        )
+
+    # -------------------------------------------------------------------------
+    # V2 VALIDATION
+    # -------------------------------------------------------------------------
+
+    try:
+        validation = validate_generated_script(
+            script_text=script_text,
+            topic=topic,
+            outline=outline,
+            strategy_map=strategy_map,
+            length_minutes=length,
+        )
+    except Exception as exc:
+        return page(
+            f"""
+            <div class="critical">
+              <h3>Validation could not run</h3>
+              <p>{esc(exc)}</p>
+              <p>
+                The script has NOT been silently passed through.
+                Fix the validator integration before relying on V2.
+              </p>
+            </div>
+            """
+        )
+
+    status = validation_status(validation)
+    validation_text = result_to_text(validation)
+
+    if status == "CRITICAL":
+
+        body_html = f"""
+          <h3>3. Script Validation</h3>
+
+          <div class="critical">
+
+            <h3>CRITICAL</h3>
+
+            <p>
+              The generated script contains one or more issues
+              that should be reviewed before it is accepted.
+            </p>
+
+          </div>
+
+          <div class="card">
+
+            <pre style="
+              white-space:pre-wrap;
+              font-family:sans-serif;
+            ">{esc(validation_text)}</pre>
+
+          </div>
+
+          <h3>Generated Script</h3>
+
+          <form method="post" action="/accept-script">
+
+            <input
+              type="hidden"
+              name="topic"
+              value="{esc(topic)}"
+            >
+
+            <textarea
+              name="script_text"
+              rows="30"
+            >{esc(script_text)}</textarea>
+
+            <br><br>
+
+            <button type="submit">
+              I Reviewed It — Continue
+            </button>
+
+          </form>
+
+          <p>
+            <a href="/">&larr; Start over</a>
+          </p>
+        """
+
+        return page(body_html)
+
+    # -------------------------------------------------------------------------
+    # PASS / WARNING
+    # -------------------------------------------------------------------------
+
+    body_html = f"""
+      <h3>3. Script Validation</h3>
+
+      <div class="pass">
+
+        <h3>PASS</h3>
+
+        <p>
+          The validator did not identify a critical blocking failure.
+        </p>
+
+      </div>
+
+      <div class="card">
+
+        <h3>Validation report</h3>
+
+        <pre style="
+          white-space:pre-wrap;
+          font-family:sans-serif;
+        ">{esc(validation_text)}</pre>
+
+      </div>
+
+      <h3>Review / Edit Final Script</h3>
+
+      <form method="post" action="/voiceover">
+
+        <textarea
+          name="script_text"
+          rows="30"
+          required
+        >{esc(script_text)}</textarea>
+
+        <br><br>
+
+        <label>
+          <strong>Voice</strong>
+        </label>
+
+        <select name="voice">
+
+          {"".join(
+              f'<option value="{esc(v)}">{esc(label)}</option>'
+              for v, label in VOICES
+          )}
+
+        </select>
+
+        <br><br>
+
+        <button type="submit">
+          Generate Voiceover
+        </button>
+
+      </form>
+
+      <p>
+        <a href="/">&larr; Start over</a>
+      </p>
+    """
+
+    return page(body_html)
+
+
+# =============================================================================
+# CRITICAL VALIDATION OVERRIDE
+#
+# The validator never silently rewrites the user's work.
+# The user remains the final editor.
+# =============================================================================
+
+@app.post("/accept-script", response_class=HTMLResponse)
+async def accept_script(
+    topic: str = Form(...),
+    script_text: str = Form(...),
+):
+
+    voice_options = "".join(
+        f'<option value="{esc(v)}">{esc(label)}</option>'
+        for v, label in VOICES
+    )
+
+    body_html = f"""
+      <h3>Final Script Review</h3>
+
+      <p class="warning">
+        You chose to continue after reviewing a critical validation report.
+        The system has not silently modified your script.
+      </p>
+
+      <form method="post" action="/voiceover">
+
+        <textarea
+          name="script_text"
+          rows="30"
+          required
+        >{esc(script_text)}</textarea>
+
+        <br><br>
+
+        <label>
+          <strong>Voice</strong>
+        </label>
+
+        <select name="voice">
+          {voice_options}
+        </select>
+
+        <br><br>
+
+        <button type="submit">
+          Generate Voiceover
+        </button>
+
+      </form>
+
+      <p>
+        <a href="/">&larr; Start over</a>
+      </p>
+    """
+
+    return page(body_html)
+
+
+# =============================================================================
+# VIDEO INSPIRATION
+# =============================================================================
+
+@app.post("/video-inspiration", response_class=HTMLResponse)
+async def video_inspiration(
+    video_url: str = Form(...),
+):
+
+    if not GEMINI_API_KEY:
+        return page(
+            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+        )
+
     if not YOUTUBE_API_KEY:
-        return page("<p style='color:#c0392b;'>Missing YOUTUBE_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
+        return page(
+            "<p class='critical'>Missing YOUTUBE_API_KEY.</p>"
+        )
 
     try:
         video_id = extract_video_id(video_url)
-        metadata = get_video_metadata(video_id, YOUTUBE_API_KEY)
-    except Exception as e:
-        return page(f"<p style='color:#c0392b;'>Could not read that video: {esc(str(e))}</p>")
 
-    title_frames_text = "\n".join(f"- {desc}" for desc in TITLE_FRAMES.values())
+        metadata = get_video_metadata(
+            video_id,
+            YOUTUBE_API_KEY,
+        )
+
+    except Exception as exc:
+        return page(
+            f"<p class='critical'>Could not read video: "
+            f"{esc(exc)}</p>"
+        )
+
+    title_frames_text = "\n".join(
+        f"- {desc}"
+        for desc in TITLE_FRAMES.values()
+    )
+
     prompt = VIDEO_INSPIRATION_PROMPT_TEMPLATE.format(
         source_title=metadata["title"],
         source_description=metadata["description"][:500],
@@ -314,126 +1611,202 @@ async def video_inspiration(video_url: str = Form(...)):
 
     try:
         raw = call_gemini(prompt)
-    except Exception as e:
-        return page(f"<p style='color:#c0392b;'>Suggestion failed: {esc(str(e))}</p>")
+    except Exception as exc:
+        return page(
+            f"<p class='critical'>Suggestion failed: "
+            f"{esc(exc)}</p>"
+        )
 
-    suggested_title, why = parse_title_suggestion(raw)
-
-    body_html = f"""
-      <h3>Suggested angle (inspired by, not copied from, the source video)</h3>
-      <p><em>Source video: {esc(metadata['title'])}</em></p>
-      <p><strong>{esc(suggested_title)}</strong></p>
-      <p>{esc(why)}</p>
-      {outline_start_form(suggested_title)}
-    """
-    return page(body_html)
-
-
-@app.post("/outline", response_class=HTMLResponse)
-async def outline(topic: str = Form(...), length_minutes: str = Form("10")):
-    if not GEMINI_API_KEY:
-        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
-
-    word_target = int(float(length_minutes) * WORDS_PER_MINUTE)
-    techniques_text = "\n\n".join(
-        f"- {t['name']}: {t['explanation']} Example: {t['example']}"
-        for t in PSYCHOLOGY_TECHNIQUES.values()
-    )
-    rehook_text = "\n".join(f"- {desc}" for desc in REHOOK_TECHNIQUES.values())
-    prompt = OUTLINE_PROMPT_TEMPLATE.format(
-        topic=topic,
-        length_minutes=length_minutes,
-        word_target=word_target,
-        structure=STRUCTURE_TEMPLATE,
-        hook_framework=HOOK_FRAMEWORK,
-        rehook_techniques=rehook_text,
-        techniques=techniques_text,
+    title_match = re.search(
+        r"TITLE:\s*(.+)",
+        raw,
+        re.IGNORECASE,
     )
 
-    try:
-        outline_text = call_gemini(prompt)
-    except Exception as e:
-        return page(f"<p style='color:#c0392b;'>Outline generation failed: {esc(str(e))}</p>")
+    why_match = re.search(
+        r"WHY:\s*(.+)",
+        raw,
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    suggested_title = (
+        title_match.group(1).strip()
+        if title_match
+        else raw.strip()
+    )
+
+    why = (
+        why_match.group(1).strip()
+        if why_match
+        else ""
+    )
+
+    suggested_title = clean_title_text(
+        suggested_title
+    )
 
     body_html = f"""
-      <h3>Review / edit the outline</h3>
-      <p>Edit anything below, then generate the full script from this outline.</p>
-      <form method="post" action="/script">
-        <input type="hidden" name="topic" value="{esc(topic)}">
-        <input type="hidden" name="length_minutes" value="{esc(length_minutes)}">
-        <textarea name="outline" rows="20" style="width:100%;font-size:15px;">{esc(outline_text)}</textarea><br><br>
-        <button type="submit" style="padding:10px 20px;font-size:16px;">Generate Full Script</button>
+      <h3>Inspired Video Angle</h3>
+
+      <div class="card">
+
+        <p>
+          <strong>Source:</strong>
+          {esc(metadata["title"])}
+        </p>
+
+        <p>
+          This is inspiration only. The new idea should not copy
+          the source video's wording or structure.
+        </p>
+
+      </div>
+
+      <form method="post" action="/analyze">
+
+        <label>
+          <strong>Suggested title / topic</strong>
+        </label>
+
+        <input
+          name="topic"
+          value="{esc(suggested_title)}"
+          required
+        >
+
+        <br><br>
+
+        <div class="card">
+
+          <strong>Why this angle</strong>
+
+          <p>{esc(why)}</p>
+
+        </div>
+
+        <label>
+          <strong>Target length</strong>
+        </label>
+
+        <input
+          name="length_minutes"
+          value="10"
+          type="number"
+          min="1"
+          max="60"
+        >
+
+        <br><br>
+
+        <button type="submit">
+          Analyze This Angle
+        </button>
+
       </form>
-      <p><a href="/">&larr; Start over</a></p>
+
+      <p>
+        <a href="/">&larr; Start over</a>
+      </p>
     """
+
     return page(body_html)
 
 
-@app.post("/script", response_class=HTMLResponse)
-async def script(topic: str = Form(...), length_minutes: str = Form("10"), outline: str = Form(...)):
-    if not GEMINI_API_KEY:
-        return page("<p style='color:#c0392b;'>Missing GEMINI_API_KEY -- add it in Render's Environment Variables, then redeploy.</p>")
+# =============================================================================
+# VOICEOVER
+# =============================================================================
 
-    word_target = int(float(length_minutes) * WORDS_PER_MINUTE)
-    prompt = SCRIPT_PROMPT_TEMPLATE.format(
-        topic=topic,
-        length_minutes=length_minutes,
-        word_target=word_target,
-        outline=outline,
-        humanizing_guidelines=HUMANIZING_GUIDELINES,
-        banned_phrases=", ".join(BANNED_PHRASES),
-        pacing_example=PACING_EXAMPLE,
+async def generate_voiceover(
+    script_text: str,
+    voice: str,
+    filepath: str,
+):
+    communicate = edge_tts.Communicate(
+        script_text,
+        voice,
     )
 
-    try:
-        script_text = call_gemini(prompt)
-    except Exception as e:
-        return page(f"<p style='color:#c0392b;'>Script generation failed: {esc(str(e))}</p>")
-
-    voice_options = "".join(f'<option value="{v}">{label}</option>' for v, label in VOICES)
-    body_html = f"""
-      <h3>Review / edit the full script</h3>
-      <form method="post" action="/voiceover">
-        <textarea name="script_text" rows="22" style="width:100%;font-size:15px;">{esc(script_text)}</textarea><br><br>
-        <label>Voice</label><br>
-        <select name="voice" style="width:100%;padding:8px;font-size:16px;">
-          {voice_options}
-        </select><br><br>
-        <button type="submit" style="padding:10px 20px;font-size:16px;">Generate Voiceover</button>
-      </form>
-      <p><a href="/">&larr; Start over</a></p>
-    """
-    return page(body_html)
-
-
-async def generate_voiceover(script_text: str, voice: str, filepath: str):
-    communicate = edge_tts.Communicate(script_text, voice)
     await communicate.save(filepath)
 
 
 @app.post("/voiceover", response_class=HTMLResponse)
-async def voiceover(script_text: str = Form(...), voice: str = Form("en-US-GuyNeural")):
-    safe_name = re.sub(r"[^a-zA-Z0-9]+", "-", script_text[:30].lower())[:30] or "voiceover"
-    filename = f"{safe_name}-{int(time.time())}.mp3"
-    filepath = os.path.join(AUDIO_DIR, filename)
+async def voiceover(
+    script_text: str = Form(...),
+    voice: str = Form("en-US-GuyNeural"),
+):
+
+    safe_name = (
+        re.sub(
+            r"[^a-zA-Z0-9]+",
+            "-",
+            script_text[:30].lower(),
+        )[:30]
+        or "voiceover"
+    )
+
+    filename = (
+        f"{safe_name}-{int(time.time())}.mp3"
+    )
+
+    filepath = os.path.join(
+        AUDIO_DIR,
+        filename,
+    )
 
     try:
-        await generate_voiceover(script_text, voice, filepath)
-    except Exception as e:
+
+        await generate_voiceover(
+            script_text,
+            voice,
+            filepath,
+        )
+
+    except Exception as exc:
+
         body_html = f"""
-          <p style="color:#c0392b;">Voiceover generation failed: {esc(str(e))}</p>
+          <p class="critical">
+            Voiceover generation failed:
+            {esc(exc)}
+          </p>
+
           <h3>Script</h3>
-          <textarea rows="22" style="width:100%;font-size:15px;">{esc(script_text)}</textarea>
-          <p><a href="/">&larr; Start over</a></p>
+
+          <textarea rows="30">{esc(script_text)}</textarea>
+
+          <p>
+            <a href="/">&larr; Start over</a>
+          </p>
         """
+
         return page(body_html)
 
     body_html = f"""
-      <h3>Script</h3>
-      <textarea rows="22" style="width:100%;font-size:15px;">{esc(script_text)}</textarea>
+      <h3>Ren Media V2 — Complete</h3>
+
+      <h3>Final Script</h3>
+
+      <textarea rows="30">{esc(script_text)}</textarea>
+
       <h3>Voiceover</h3>
-      <audio controls src="/audio/{filename}" style="width:100%;"></audio><br>
-      <a href="/audio/{filename}" download>Download voiceover (.mp3)</a>
-      <p><a href="/">&larr; Start over</a></p>
+
+      <audio
+        controls
+        src="/audio/{esc(filename)}"
+        style="width:100%;"
+      ></audio>
+
+      <br><br>
+
+      <a
+        href="/audio/{esc(filename)}"
+        download
+      >
+        Download voiceover (.mp3)
+      </a>
+
+      <p>
+        <a href="/">&larr; Create another video</a>
+      </p>
     """
+
     return page(body_html)
