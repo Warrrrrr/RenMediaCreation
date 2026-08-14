@@ -1,1514 +1,820 @@
+"""Ren Media V2.1 deterministic script validator.
+
+The validator is deliberately conservative.
+
+It does NOT pretend that regex can prove whether a factual claim is true.
+Instead it catches observable structural, rhetorical, fabrication, and
+governance failures and surfaces factual/psychological claims for review.
+
+V2.1 adds:
+- approved-strategy compliance checks
+- outline adherence checks
+- strategy-role effectiveness signals
+- open-loop density checks
+- claim-risk detection
+- stronger rhetorical-pattern detection
+- clearer CRITICAL / WARNING / PASS output
+
+The validator never rewrites the script.
 """
-Ren Media V2 — Script Validator
 
-Purpose:
-- Inspect generated scripts before final approval.
-- Detect high-risk fabrication and reasoning failures.
-- Check strategy usage.
-- Check structural compliance.
-- Check rhetorical and emotional-pattern problems.
-
-IMPORTANT:
-This module does NOT rewrite the script.
-
-It produces a structured validation request/result.
-
-Gemini is used for semantic inspection because several checks
-cannot be reliably performed with simple string matching.
-
-Deterministic checks are also included where possible.
-"""
-
-import json
 import re
 
 from governance import (
     PERSONAL_EXPERIENCE_FIREWALL,
-    CLAIM_TYPES,
-    CLAIM_CALIBRATION_RULES,
-    PSYCHOLOGY_CLAIM_FIREWALL,
-    PSYCHOLOGY_PERFUME_CHECK,
-    EMOTIONAL_INTENSITY,
-    RHETORICAL_PATTERN_CONTROL,
-    OPEN_LOOP_GOVERNANCE,
-    CTA_GOVERNANCE,
-    ETHICAL_GUARDRAILS,
-    SCRIPT_STRUCTURE_GOVERNANCE,
-    STRATEGY_GOVERNANCE,
-    VALIDATION_SEVERITY,
+    PSYCHOLOGY_FIREWALL,
+    EMOTIONAL_RULES,
+    RHETORICAL_RULES,
+    CTA_RULES,
+    ETHICAL_RULES,
 )
+from strategies import STRATEGIES
 
 
-# ============================================================
-# VALIDATOR VERSION
-# ============================================================
+# ---------------------------------------------------------------------------
+# Basic utilities
+# ---------------------------------------------------------------------------
 
-VALIDATOR_VERSION = "2.0"
-
-
-# ============================================================
-# RESULT FORMAT
-# ============================================================
-
-RESULT_SCHEMA = {
-    "validator_version": VALIDATOR_VERSION,
-
-    "overall_status": (
-        "PASS | WARNING | CRITICAL"
-    ),
-
-    "critical": [],
-
-    "warnings": [],
-
-    "passes": [],
-
-    "claims": [],
-
-    "strategy_effectiveness": [],
-
-    "open_loops": [],
-
-    "rhetorical_patterns": [],
-
-    "word_count": {
-        "actual": 0,
-        "target": 0,
-        "within_tolerance": True,
-    },
-}
+def _word_count(text):
+    return len(re.findall(r"\b[\w'’-]+\b", text or ""))
 
 
-# ============================================================
-# BASIC TEXT HELPERS
-# ============================================================
-
-def normalize_script(script):
-    """Return a safe string representation of the script."""
-
-    if script is None:
-        return ""
-
-    return str(script).strip()
+def _find(pattern, text, flags=re.I):
+    return list(re.finditer(pattern, text or "", flags))
 
 
-def word_count(script):
-    """Count words conservatively."""
+def _normalise(text):
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
 
-    script = normalize_script(script)
 
-    if not script:
+def _contains_any(text, phrases):
+    lowered = _normalise(text)
+    return [p for p in phrases if p.lower() in lowered]
+
+
+def _position_ratio(match, text):
+    if not text:
+        return 0.0
+    return match.start() / max(1, len(text))
+
+
+def _window_count(pattern, text, window_chars, flags=re.I):
+    """Return maximum number of matches inside any rolling character window."""
+    matches = _find(pattern, text, flags)
+
+    if not matches:
         return 0
 
-    return len(
-        re.findall(
-            r"\b[\w'-]+\b",
-            script,
-            flags=re.UNICODE,
-        )
-    )
+    starts = [m.start() for m in matches]
+    maximum = 1
+
+    left = 0
+    for right in range(len(starts)):
+        while starts[right] - starts[left] > window_chars:
+            left += 1
+        maximum = max(maximum, right - left + 1)
+
+    return maximum
 
 
-def count_pattern(script, pattern):
-    """
-    Case-insensitive occurrence count.
+# ---------------------------------------------------------------------------
+# Strategy-map parsing
+# ---------------------------------------------------------------------------
 
-    This is intentionally approximate.
-    Semantic validation happens separately.
-    """
+def _extract_strategy_keys(strategy_map):
+    """Extract approved strategy keys from the editable strategy-map text.
 
-    script = normalize_script(script)
+    The UI currently serialises entries like:
 
-    if not script:
-        return 0
+        - strategy_key | Strategy Name | role | intensity | ...
 
-    return len(
-        re.findall(
-            re.escape(pattern),
-            script,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
-# ============================================================
-# WORD COUNT VALIDATION
-# ============================================================
-
-def validate_word_count(
-    script,
-    target_words,
-    tolerance=0.10,
-):
-    """
-    Check whether the generated script is within the
-    allowed word-count tolerance.
-
-    Returns a structured result.
+    This parser intentionally tolerates small formatting differences.
     """
 
-    actual = word_count(script)
+    if not strategy_map:
+        return []
 
-    try:
-        target = int(target_words)
-    except (TypeError, ValueError):
-        target = 0
+    found = []
 
-    if target <= 0:
+    for key in STRATEGIES:
+        if re.search(
+            rf"\b{re.escape(key)}\b",
+            strategy_map,
+            re.I,
+        ):
+            found.append(key)
+
+    return found
+
+
+def _strategy_evidence_terms(key):
+    """Return useful observable signals for a strategy.
+
+    These are NOT proof that the strategy worked.
+    They are evidence signals used to identify obviously absent strategies.
+    """
+
+    strategy = STRATEGIES.get(key, {})
+
+    terms = []
+
+    # Strategy-specific keywords from the library.
+    for keyword in strategy.get("keywords", []):
+        terms.append(keyword)
+
+    # A few structural signals are better than keywords alone.
+    if key in {"zeigarnik_effect", "curiosity_gaps"}:
+        terms.extend([
+            "why",
+            "how",
+            "reason",
+            "question",
+            "answer",
+            "later",
+        ])
+
+    elif key == "pattern_interrupts":
+        terms.extend([
+            "imagine",
+            "consider",
+            "here's the thing",
+            "look at",
+            "instead",
+        ])
+
+    elif key == "emotional_triggers":
+        terms.extend([
+            "feel",
+            "fear",
+            "frustrat",
+            "pain",
+            "risk",
+            "loss",
+            "matter",
+        ])
+
+    elif key == "self_verification_theory":
+        terms.extend([
+            "you feel",
+            "you may",
+            "you've probably",
+            "you might",
+            "many people",
+        ])
+
+    elif key == "choice_architecture":
+        terms.extend([
+            "option",
+            "choice",
+            "trade-off",
+            "alternative",
+            "you can",
+        ])
+
+    elif key == "foot_in_the_door_content":
+        terms.extend([
+            "first",
+            "start with",
+            "once you accept",
+            "the larger implication",
+        ])
+
+    elif key == "foot_in_the_door_audience":
+        terms.extend([
+            "comment",
+            "notice",
+            "ask yourself",
+            "think about",
+        ])
+
+    elif key == "reciprocity":
+        terms.extend([
+            "use this",
+            "try this",
+            "here's a practical",
+            "you can do",
+        ])
+
+    elif key == "commitment_consistency":
+        terms.extend([
+            "try",
+            "practice",
+            "tonight",
+            "today",
+            "commit",
+        ])
+
+    elif key == "liking":
+        terms.extend([
+            "relatable",
+            "human",
+            "honest",
+            "mistake",
+        ])
+
+    elif key == "scarcity":
+        terms.extend([
+            "rare",
+            "limited",
+            "uncommon",
+        ])
+
+    elif key == "authority":
+        terms.extend([
+            "research",
+            "study",
+            "expert",
+            "evidence",
+        ])
+
+    elif key == "social_proof":
+        terms.extend([
+            "people",
+            "common",
+            "survey",
+            "examples",
+        ])
+
+    elif key == "point_development":
+        terms.extend([
+            "because",
+            "for example",
+            "that means",
+            "which means",
+            "why this matters",
+        ])
+
+    elif key == "point_ordering":
+        terms.extend([
+            "first",
+            "then",
+            "more importantly",
+            "finally",
+            "most importantly",
+        ])
+
+    elif key == "zoom_into_the_moment":
+        terms.extend([
+            "imagine",
+            "picture",
+            "suppose",
+            "you walk",
+            "you sit",
+            "you look",
+        ])
+
+    return list(dict.fromkeys(terms))
+
+
+def _strategy_effectiveness(script, selected_keys):
+    """Produce evidence signals for every approved strategy.
+
+    Important: absence of keyword evidence does NOT prove that the strategy
+    failed. It produces a WARNING asking for human review.
+    """
+
+    results = []
+
+    lowered = _normalise(script)
+
+    for key in selected_keys:
+        strategy = STRATEGIES.get(key)
+
+        if not strategy:
+            results.append({
+                "key": key,
+                "status": "WARNING",
+                "message": f"Approved strategy '{key}' is not present in the strategy library.",
+            })
+            continue
+
+        terms = _strategy_evidence_terms(key)
+        matched = [term for term in terms if term.lower() in lowered]
+
+        if matched:
+            results.append({
+                "key": key,
+                "status": "PASS",
+                "message": (
+                    f"{strategy['name']} has observable execution signals "
+                    f"({', '.join(matched[:4])})."
+                ),
+            })
+        else:
+            results.append({
+                "key": key,
+                "status": "WARNING",
+                "message": (
+                    f"{strategy['name']} was approved but no clear execution "
+                    "signal was detected. Review the script manually."
+                ),
+            })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Outline adherence
+# ---------------------------------------------------------------------------
+
+def _outline_sections(outline):
+    """Extract likely section labels from the editable outline."""
+
+    if not outline:
+        return []
+
+    sections = []
+
+    for line in outline.splitlines():
+        line = line.strip()
+
+        if not line:
+            continue
+
+        # Existing outline format:
+        # [SECTION NAME] -- description
+        match = re.match(r"^\[([^\]]+)\]", line)
+
+        if match:
+            sections.append(match.group(1).strip())
+            continue
+
+        # Also tolerate numbered headings:
+        # 1. Hook ...
+        match = re.match(r"^\d+\.\s*([^-\n]+)", line)
+
+        if match:
+            candidate = match.group(1).strip()
+            if candidate:
+                sections.append(candidate)
+
+    return sections
+
+
+def _check_outline_adherence(script, outline):
+    """Look for major outline loss.
+
+    Because the final script intentionally contains no headings, this cannot
+    prove exact beat-by-beat adherence. It checks whether the outline's major
+    concepts appear to have survived.
+    """
+
+    if not outline:
         return {
-            "actual": actual,
-            "target": target,
-            "within_tolerance": True,
+            "status": "WARNING",
+            "message": "No approved outline was supplied to the validator.",
+        }
+
+    sections = _outline_sections(outline)
+
+    if not sections:
+        return {
+            "status": "WARNING",
+            "message": "The outline format could not be parsed reliably.",
+        }
+
+    script_words = set(
+        re.findall(r"\b[a-zA-Z]{5,}\b", _normalise(script))
+    )
+
+    represented = 0
+
+    for section in sections:
+        meaningful_words = [
+            w.lower()
+            for w in re.findall(r"\b[a-zA-Z]{5,}\b", section)
+            if w.lower() not in {
+                "section",
+                "purpose",
+                "content",
+                "beat",
+                "hook",
+                "setup",
+                "climax",
+                "resolution",
+                "outro",
+                "cta",
+            }
+        ]
+
+        if not meaningful_words:
+            continue
+
+        overlap = sum(
+            1 for word in meaningful_words
+            if word in script_words
+        )
+
+        if overlap >= max(1, min(2, len(meaningful_words))):
+            represented += 1
+
+    coverage = represented / max(1, len(sections))
+
+    if coverage >= 0.65:
+        return {
             "status": "PASS",
-            "reason": (
-                "No valid target word count was supplied."
+            "message": (
+                f"Major outline concepts appear represented "
+                f"({represented}/{len(sections)} detected)."
             ),
         }
 
-    minimum = int(
-        target * (1 - tolerance)
-    )
-
-    maximum = int(
-        target * (1 + tolerance)
-    )
-
-    within = (
-        minimum <= actual <= maximum
-    )
-
-    return {
-        "actual": actual,
-        "target": target,
-        "minimum": minimum,
-        "maximum": maximum,
-        "within_tolerance": within,
-        "status": (
-            "PASS"
-            if within
-            else "WARNING"
-        ),
-        "reason": (
-            f"Actual word count is {actual}; "
-            f"target is {target}; "
-            f"allowed range is {minimum}-{maximum}."
-        ),
-    }
-
-
-# ============================================================
-# DETERMINISTIC PERSONAL EXPERIENCE CHECK
-# ============================================================
-
-PERSONAL_EXPERIENCE_PATTERNS = [
-
-    r"\bi remember\b",
-
-    r"\bi used to\b",
-
-    r"\bin my own life\b",
-
-    r"\bin my life\b",
-
-    r"\bwhen i was\b",
-
-    r"\bwhen i first\b",
-
-    r"\bi spent years\b",
-
-    r"\bi've spent years\b",
-
-    r"\bi have spent years\b",
-
-    r"\bi learned this the hard way\b",
-
-    r"\bi made this mistake\b",
-
-    r"\bi made the same mistake\b",
-
-    r"\bi've made this mistake\b",
-
-    r"\bi have made this mistake\b",
-
-    r"\bi've seen this\b",
-
-    r"\bi have seen this\b",
-
-    r"\bin my experience\b",
-
-    r"\bfrom my experience\b",
-
-    r"\bmy clients\b",
-
-    r"\bmy patients\b",
-
-    r"\bmy students\b",
-
-    r"\bpeople i've coached\b",
-
-    r"\bpeople i coached\b",
-]
-
-
-def detect_personal_experience_language(script):
-    """
-    Detect likely first-person experiential claims.
-
-    IMPORTANT:
-    Detection is not automatically proof of fabrication.
-
-    The user may legitimately provide personal source material.
-
-    Therefore this function flags occurrences for review.
-    """
-
-    script = normalize_script(script)
-
-    findings = []
-
-    for pattern in PERSONAL_EXPERIENCE_PATTERNS:
-
-        matches = re.finditer(
-            pattern,
-            script,
-            flags=re.IGNORECASE,
-        )
-
-        for match in matches:
-
-            start = max(
-                0,
-                match.start() - 100,
-            )
-
-            end = min(
-                len(script),
-                match.end() + 180,
-            )
-
-            excerpt = script[start:end].strip()
-
-            findings.append({
-                "type":
-                    "possible_personal_experience",
-
-                "matched_pattern":
-                    pattern,
-
-                "excerpt":
-                    excerpt,
-
-                "severity":
-                    "CRITICAL",
-            })
-
-    return findings
-
-
-# ============================================================
-# RHETORICAL PATTERN CHECK
-# ============================================================
-
-def detect_rhetorical_patterns(script):
-    """
-    Detect repeated rhetorical templates.
-
-    The purpose is not to ban a sentence construction.
-
-    It is to identify excessive repetition.
-    """
-
-    script = normalize_script(script)
-
-    findings = []
-
-    for item in RHETORICAL_PATTERN_CONTROL[
-        "patterns_to_monitor"
-    ]:
-
-        pattern = item["pattern"]
-
-        count = count_pattern(
-            script,
-            pattern,
-        )
-
-        if count >= 3:
-
-            findings.append({
-                "pattern": pattern,
-
-                "count": count,
-
-                "severity": "WARNING",
-
-                "reason": item["rule"],
-            })
-
-        elif count > 0:
-
-            findings.append({
-                "pattern": pattern,
-
-                "count": count,
-
-                "severity": "PASS",
-
-                "reason":
-                    "Pattern detected within normal usage range.",
-            })
-
-    return findings
-
-
-# ============================================================
-# OPEN LOOP HEURISTIC
-# ============================================================
-
-OPEN_LOOP_MARKERS = [
-
-    "but there's one problem",
-
-    "but here's what",
-
-    "the real reason",
-
-    "and this is where",
-
-    "but there's something else",
-
-    "we'll come back to that",
-
-    "later i'll show you",
-
-    "in a moment you'll see",
-
-    "the answer comes later",
-
-    "but before we get there",
-
-    "here's where it gets interesting",
-]
-
-
-def detect_open_loop_markers(script):
-    """
-    Approximate open-loop detection.
-
-    This is not a semantic proof.
-
-    Gemini validation will perform the deeper inspection.
-    """
-
-    script = normalize_script(script)
-
-    findings = []
-
-    for marker in OPEN_LOOP_MARKERS:
-
-        count = count_pattern(
-            script,
-            marker,
-        )
-
-        if count > 0:
-
-            findings.append({
-                "marker": marker,
-                "count": count,
-                "severity": "WARNING"
-                if count >= 3
-                else "PASS",
-            })
-
-    return findings
-
-
-# ============================================================
-# ETHICAL KEYWORD CHECK
-# ============================================================
-
-ETHICAL_RISK_PATTERNS = [
-
-    r"\bguaranteed\b",
-
-    r"\bguarantee\b",
-
-    r"\b100% guaranteed\b",
-
-    r"\bthis will always\b",
-
-    r"\byou will definitely\b",
-
-    r"\bscientifically proven\b",
-
-    r"\bproven to work for everyone\b",
-
-    r"\bact now or regret it\b",
-
-    r"\bonly today\b",
-
-    r"\blast chance\b",
-]
-
-
-def detect_obvious_ethics_risks(script):
-    """
-    Detect obvious high-risk persuasion language.
-
-    This does not replace semantic ethical review.
-    """
-
-    script = normalize_script(script)
-
-    findings = []
-
-    for pattern in ETHICAL_RISK_PATTERNS:
-
-        matches = list(
-            re.finditer(
-                pattern,
-                script,
-                flags=re.IGNORECASE,
-            )
-        )
-
-        for match in matches:
-
-            start = max(
-                0,
-                match.start() - 80,
-            )
-
-            end = min(
-                len(script),
-                match.end() + 120,
-            )
-
-            findings.append({
-                "pattern":
-                    match.group(0),
-
-                "excerpt":
-                    script[start:end].strip(),
-
-                "severity":
-                    "CRITICAL",
-            })
-
-    return findings
-
-
-# ============================================================
-# PSYCHOLOGY TERM CHECK
-# ============================================================
-
-PSYCHOLOGY_TERMS = [
-
-    "zeigarnik effect",
-
-    "self-verification",
-
-    "social proof",
-
-    "reciprocity",
-
-    "commitment and consistency",
-
-    "commitment consistency",
-
-    "scarcity",
-
-    "authority",
-
-    "liking",
-
-    "choice architecture",
-
-    "nudge",
-
-    "cognitive bias",
-
-    "confirmation bias",
-
-    "availability heuristic",
-
-    "anchoring",
-
-    "loss aversion",
-
-    "halo effect",
-
-    "mere exposure effect",
-
-    "dunning-kruger",
-
-    "dunning kruger",
-
-]
-
-
-def detect_psychology_terms(script):
-    """
-    Identify psychology terminology for semantic review.
-
-    Merely mentioning a term is NOT a failure.
-    """
-
-    script = normalize_script(script)
-
-    findings = []
-
-    for term in PSYCHOLOGY_TERMS:
-
-        count = count_pattern(
-            script,
-            term,
-        )
-
-        if count > 0:
-
-            findings.append({
-                "term": term,
-                "count": count,
-                "requires_explanation_review": True,
-            })
-
-    return findings
-
-
-# ============================================================
-# STRATEGY EFFECTIVENESS PROMPT
-# ============================================================
-
-def build_strategy_effectiveness_prompt(
-    script,
-    strategy_map,
-):
-    """
-    Build a Gemini instruction for checking whether the
-    approved strategies actually performed their intended jobs.
-    """
-
-    selected = strategy_map.get(
-        "selected",
-        [],
-    )
-
-    strategy_text = []
-
-    for item in selected:
-
-        strategy_text.append(
-            {
-                "strategy":
-                    item.get("strategy"),
-
-                "name":
-                    item.get("name"),
-
-                "role":
-                    item.get("role"),
-
-                "intensity":
-                    item.get("intensity"),
-
-                "desired_response":
-                    item.get(
-                        "desired_response"
-                    ),
-            }
-        )
-
-    payload = {
-        "selected_strategies":
-            strategy_text,
-
-        "script":
-            normalize_script(script),
-
-        "instruction": (
-            "For each approved strategy, determine whether "
-            "the script actually uses it for its assigned role. "
-            "Do not reward mere terminology. "
-            "A strategy passes only when its intended function "
-            "is visible in the writing."
-        ),
-
-        "required_fields": [
-            "strategy",
-            "used",
-            "evidence",
-            "effectiveness",
-            "problem",
-        ],
-    }
-
-    return json.dumps(
-        payload,
-        indent=2,
-        ensure_ascii=False,
-    )
-
-
-# ============================================================
-# MASTER VALIDATION PROMPT
-# ============================================================
-
-def build_validation_prompt(
-    script,
-    strategy_map,
-    outline="",
-    topic="",
-    audience="",
-    objective="",
-    target_words=0,
-):
-    """
-    Construct the semantic validation request.
-
-    Gemini should inspect the script.
-
-    It must NOT rewrite it.
-    """
-
-    governance = {
-
-        "personal_experience_firewall":
-            PERSONAL_EXPERIENCE_FIREWALL,
-
-        "claim_types":
-            CLAIM_TYPES,
-
-        "claim_calibration":
-            CLAIM_CALIBRATION_RULES,
-
-        "psychology_claim_firewall":
-            PSYCHOLOGY_CLAIM_FIREWALL,
-
-        "psychology_perfume_check":
-            PSYCHOLOGY_PERFUME_CHECK,
-
-        "emotional_intensity":
-            EMOTIONAL_INTENSITY,
-
-        "rhetorical_patterns":
-            RHETORICAL_PATTERN_CONTROL,
-
-        "open_loops":
-            OPEN_LOOP_GOVERNANCE,
-
-        "cta":
-            CTA_GOVERNANCE,
-
-        "ethics":
-            ETHICAL_GUARDRAILS,
-
-        "structure":
-            SCRIPT_STRUCTURE_GOVERNANCE,
-
-        "strategy":
-            STRATEGY_GOVERNANCE,
-    }
-
-    validation_instruction = """
-You are the Ren Media V2 script validator.
-
-Your job is to INSPECT the supplied script.
-
-You are NOT the writer.
-
-Do NOT rewrite the script.
-
-Do NOT improve the script.
-
-Do NOT silently correct mistakes.
-
-Identify problems precisely so another stage or the human
-can decide what to do.
-
-You must distinguish between:
-
-CRITICAL
-A serious integrity, fabrication, safety, deception, or
-major reasoning failure.
-
-WARNING
-A quality problem requiring review but not necessarily
-making the script unusable.
-
-PASS
-No detected problem in that category.
-
-IMPORTANT:
-
-1. Never assume a statistic is true merely because it sounds
-   plausible.
-
-2. Never assume a psychological claim is true merely because
-   it uses scientific terminology.
-
-3. Treat first-person experiences as potentially fabricated
-   unless explicitly supplied as source material.
-
-4. Distinguish correlation from causation.
-
-5. Distinguish research findings from interpretations.
-
-6. Do not reward psychological terminology simply because
-   it appears sophisticated.
-
-7. Check whether every approved strategy actually performs
-   its assigned role.
-
-8. Check whether open loops eventually receive meaningful
-   payoffs.
-
-9. Check whether rhetorical patterns are becoming repetitive.
-
-10. Check whether emotional intensity varies naturally.
-
-11. Check whether the CTA interrupts unresolved narrative
-    tension.
-
-12. Check whether persuasion remains honest.
-
-13. Do not invent sources to justify your validation.
-
-14. Do not make claims about evidence that was not supplied.
-
-Return JSON only.
-
-Required top-level fields:
-
-{
-  "overall_status": "PASS | WARNING | CRITICAL",
-
-  "critical": [],
-
-  "warnings": [],
-
-  "passes": [],
-
-  "claims": [],
-
-  "strategy_effectiveness": [],
-
-  "open_loops": [],
-
-  "rhetorical_patterns": [],
-
-  "emotional_intensity": {},
-
-  "cta": {},
-
-  "ethics": {},
-
-  "structure": {},
-
-  "word_count": {}
-}
-
-Each critical/warning finding should contain:
-
-{
-  "type": "",
-  "location": "",
-  "problem": "",
-  "why_it_matters": "",
-  "recommended_action": ""
-}
-
-Do not rewrite the offending passage.
-"""
-
-    payload = {
-
-        "instruction":
-            validation_instruction,
-
-        "video_context": {
-
-            "topic":
-                topic,
-
-            "audience":
-                audience,
-
-            "objective":
-                objective,
-
-            "target_words":
-                target_words,
-        },
-
-        "approved_outline":
-            outline,
-
-        "approved_strategy_map":
-            strategy_map,
-
-        "governance":
-            governance,
-
-        "script":
-            normalize_script(script),
-    }
-
-    return json.dumps(
-        payload,
-        indent=2,
-        ensure_ascii=False,
-    )
-
-
-# ============================================================
-# RESULT NORMALIZATION
-# ============================================================
-
-def normalize_validation_result(result):
-    """
-    Normalize Gemini's response into the expected structure.
-
-    If Gemini returns a dictionary, preserve its useful fields.
-
-    If it returns malformed data, return a safe failure result
-    rather than pretending validation succeeded.
-    """
-
-    if not isinstance(result, dict):
-
+    if coverage >= 0.40:
         return {
-            "validator_version":
-                VALIDATOR_VERSION,
-
-            "overall_status":
-                "CRITICAL",
-
-            "critical": [
-                {
-                    "type":
-                        "validator_output_error",
-
-                    "location":
-                        "validator",
-
-                    "problem":
-                        "Validator returned an invalid result.",
-
-                    "why_it_matters":
-                        "The script cannot be treated as validated.",
-
-                    "recommended_action":
-                        "Run validation again.",
-                }
-            ],
-
-            "warnings": [],
-
-            "passes": [],
-
-            "claims": [],
-
-            "strategy_effectiveness": [],
-
-            "open_loops": [],
-
-            "rhetorical_patterns": [],
-
-            "emotional_intensity": {},
-
-            "cta": {},
-
-            "ethics": {},
-
-            "structure": {},
-
-            "word_count": {},
+            "status": "WARNING",
+            "message": (
+                f"Only {represented}/{len(sections)} major outline concepts "
+                "were clearly detected. Review whether approved beats were lost."
+            ),
         }
 
-    normalized = dict(
-        RESULT_SCHEMA
-    )
-
-    normalized.update(result)
-
-    normalized[
-        "validator_version"
-    ] = VALIDATOR_VERSION
-
-    return normalized
+    return {
+        "status": "CRITICAL",
+        "message": (
+            f"Only {represented}/{len(sections)} major outline concepts "
+            "were detected. The generated script may have substantially "
+            "departed from the approved structure."
+        ),
+    }
 
 
-# ============================================================
-# LOCAL PRECHECK
-# ============================================================
+# ---------------------------------------------------------------------------
+# Main validator
+# ---------------------------------------------------------------------------
 
-def run_local_precheck(
+def validate_script(
     script,
-    target_words=0,
+    target_words=None,
+    selected_strategy_keys=None,
+    outline=None,
+    strategy_map=None,
 ):
-    """
-    Run inexpensive deterministic checks before Gemini.
-
-    These checks are intentionally conservative.
-
-    They identify things that are obvious enough to flag locally.
-    They do not claim to understand the entire script.
-    """
-
-    script = normalize_script(script)
-
     critical = []
     warnings = []
-    passes = []
+    passed = []
 
-    # --------------------------------------------------------
-    # Word count
-    # --------------------------------------------------------
+    script = script or ""
 
-    length_result = validate_word_count(
+    words = _word_count(script)
+
+    # -----------------------------------------------------------------------
+    # 1. Length
+    # -----------------------------------------------------------------------
+
+    if target_words:
+        ratio = words / max(1, target_words)
+
+        if ratio < 0.90 or ratio > 1.10:
+            critical.append(
+                f"Length is {words} words versus a target of "
+                f"{target_words} (outside ±10%)."
+            )
+        else:
+            passed.append("Length is within ±10% of target.")
+
+    # -----------------------------------------------------------------------
+    # 2. Personal-experience firewall
+    # -----------------------------------------------------------------------
+
+    personal_patterns = [
+        r"\bI remember\b",
+        r"\bI used to\b",
+        r"\bI spent years\b",
+        r"\bin my life\b",
+        r"\bin my relationship\b",
+        r"\bmy relationship\b",
+        r"\bmy marriage\b",
+        r"\bmy clients?\b",
+        r"\bmy patients?\b",
+        r"\bwhen I was\b",
+        r"\bI once\b",
+        r"\bI learned this\b",
+        r"\bI made this mistake\b",
+        r"\bI've made this mistake\b",
+    ]
+
+    personal_matches = []
+
+    for pattern in personal_patterns:
+        personal_matches.extend(_find(pattern, script))
+
+    if personal_matches:
+        critical.append(
+            "Possible fabricated first-person experience or biography. "
+            "Every first-person lived claim must come from supplied source material."
+        )
+    else:
+        passed.append(
+            "No obvious fabricated first-person lived-experience pattern detected."
+        )
+
+    # -----------------------------------------------------------------------
+    # 3. Numeric / evidence-sensitive claims
+    # -----------------------------------------------------------------------
+
+    percentages = _find(
+        r"\b\d+(?:\.\d+)?\s*%"
+        r"|\b(?:ninety|eighty|seventy|sixty|fifty|forty|thirty|twenty)"
+        r"\s*percent\b",
         script,
-        target_words,
     )
 
-    if (
-        length_result["status"]
-        == "WARNING"
-    ):
+    statistics = _find(
+        r"\b(?:\d+(?:\.\d+)?\s*(?:times|people|couples|participants|"
+        r"years|months|days|studies))\b",
+        script,
+    )
 
-        warnings.append({
-            "type":
-                "word_count",
+    if percentages or statistics:
+        warnings.append(
+            "Specific numerical/statistical claims detected. "
+            "Verify each claim against a real source before publication."
+        )
+    else:
+        passed.append("No obvious precise numerical claims detected.")
 
-            "location":
-                "entire script",
+    # -----------------------------------------------------------------------
+    # 4. Strong causal / certainty language
+    # -----------------------------------------------------------------------
 
-            "problem":
-                length_result["reason"],
+    causal = _find(
+        r"\b(?:causes?|caused|proves?|proven|guarantees?|guaranteed|"
+        r"will make you|makes you|always leads to|will inevitably|"
+        r"ensures?|ensured|prevents?)\b",
+        script,
+    )
 
-            "why_it_matters":
-                "Large deviations can affect pacing and delivery.",
+    if causal:
+        warnings.append(
+            "Strong causal or certainty language detected. "
+            "Check whether the evidence supports the strength of each claim."
+        )
+    else:
+        passed.append("No obvious strong causal/guarantee language detected.")
 
-            "recommended_action":
-                "Adjust the script length before final approval.",
-        })
+    # -----------------------------------------------------------------------
+    # 5. Psychology / physiology claims
+    # -----------------------------------------------------------------------
+
+    physiology = _find(
+        r"\b(?:heart rate|nervous system|cortisol|dopamine|"
+        r"immune system|physiological|physiology|chemical|"
+        r"brain|amygdala|nervous system|hormone|hormonal)\b",
+        script,
+    )
+
+    if physiology:
+        warnings.append(
+            "Psychology/physiology terminology detected. "
+            "Verify that any mechanism described is supported and "
+            "not presented as universal certainty."
+        )
+
+    # -----------------------------------------------------------------------
+    # 6. Psychology perfume / named-technique misuse
+    # -----------------------------------------------------------------------
+
+    technique_jargon = _find(
+        r"\b(?:open loop|macro loop|micro loop|rehook|pattern interrupt|"
+        r"foot[- ]in[- ]the[- ]door|Zeigarnik|Cialdini|nudge|"
+        r"choice architecture|self[- ]verification|social proof|"
+        r"reciprocity|commitment and consistency)\b",
+        script,
+    )
+
+    if technique_jargon:
+        critical.append(
+            "Psychology/storytelling technique terminology appears in the "
+            "narration. Execute the technique; do not name the technique to viewers."
+        )
+    else:
+        passed.append(
+            "No obvious psychology/storytelling technique jargon detected in narration."
+        )
+
+    # -----------------------------------------------------------------------
+    # 7. Rhetorical repetition
+    # -----------------------------------------------------------------------
+
+    it_is_not = _find(
+        r"\b(?:it isn't|it is not)\b"
+        r"[^.!?]{0,100}"
+        r"\b(?:it's|it is)\b",
+        script,
+    )
+
+    truth_is = _find(r"\bthe truth is\b", script)
+
+    heres_the = _find(
+        r"\bbut here's (?:the|what|why|where)\b",
+        script,
+    )
+
+    this_is = _find(
+        r"\bthis is (?:why|where|the moment|the reason)\b",
+        script,
+    )
+
+    if len(it_is_not) > 3:
+        warnings.append(
+            "The 'It isn't X, it's Y' construction is repeated more than three times."
+        )
+
+    if len(truth_is) > 2:
+        warnings.append(
+            "The 'The truth is...' construction is repeated more than twice."
+        )
+
+    if len(heres_the) > 2:
+        warnings.append(
+            "Repeated 'But here's...' transition pattern detected."
+        )
+
+    if len(this_is) > 3:
+        warnings.append(
+            "Repeated 'This is...' rhetorical transition pattern detected."
+        )
+
+    # -----------------------------------------------------------------------
+    # 8. Open-loop density
+    # -----------------------------------------------------------------------
+
+    loop_patterns = [
+        r"\byou(?:'ll| will) (?:find out|learn|discover|see)\b",
+        r"\bthe answer comes later\b",
+        r"\bthere's (?:one|another|a) (?:reason|thing|problem)\b",
+        r"\bbut we'll get to that\b",
+        r"\bwe'll come back to that\b",
+        r"\bhere's what happens next\b",
+        r"\bthe real reason\b",
+        r"\bthe answer is coming\b",
+    ]
+
+    loop_count = 0
+
+    for pattern in loop_patterns:
+        loop_count += len(_find(pattern, script))
+
+    if loop_count > 8:
+        warnings.append(
+            f"Approximately {loop_count} open-loop announcement signals detected. "
+            "Review for promise fatigue and unresolved questions."
+        )
+
+    # Roughly 90 seconds at 150 WPM = 225 words.
+    dense_loop_max = max(
+        _window_count(
+            "|".join(f"(?:{p})" for p in loop_patterns),
+            script,
+            225 * 6,
+        ),
+        0,
+    )
+
+    if dense_loop_max > 2:
+        warnings.append(
+            "More than two open-loop announcement signals occur within a "
+            "rough 90-second window. Review for excessive suspense stacking."
+        )
+
+    # -----------------------------------------------------------------------
+    # 9. CTA governance
+    # -----------------------------------------------------------------------
+
+    cta = _find(
+        r"\b(?:subscribe|hit the subscribe button|"
+        r"like and subscribe|comment below|"
+        r"type ['\"]?(?:yes|no)['\"]?|"
+        r"let me know in the comments)\b",
+        script,
+    )
+
+    if cta:
+        early_ctas = [
+            m for m in cta
+            if _position_ratio(m, script) < 0.70
+        ]
+
+        if early_ctas:
+            warnings.append(
+                "A CTA appears before the final third. "
+                "Check that it does not interrupt unresolved narrative tension."
+            )
+        else:
+            passed.append("Main CTA appears late in the script.")
+
+        if len(cta) > 2:
+            warnings.append(
+                f"{len(cta)} CTA/engagement prompts detected. "
+                "Review whether the audience is being asked too often."
+            )
+
+    # -----------------------------------------------------------------------
+    # 10. Emotional intensity
+    # -----------------------------------------------------------------------
+
+    emotional = _find(
+        r"\b(?:terrifying|terrified|destroy|destroying|destroyed|"
+        r"dead|death|poison|poisonous|doomed|catastrophic|"
+        r"life[- ]?changing|you won't stand a chance|"
+        r"you'll regret|nightmare|horrifying|disaster)\b",
+        script,
+    )
+
+    if len(emotional) >= 8:
+        critical.append(
+            "High-intensity language is unusually concentrated. "
+            "Reduce escalation unless the topic genuinely warrants it."
+        )
+    elif len(emotional) >= 5:
+        warnings.append(
+            "High-intensity language appears frequently. "
+            "Check that emotional escalation is balanced with explanation."
+        )
+
+    # -----------------------------------------------------------------------
+    # 11. Personal manipulation / ethical warning signals
+    # -----------------------------------------------------------------------
+
+    manipulation = _find(
+        r"\b(?:act now|before it's too late|don't miss out|"
+        r"you have no choice|only smart people|"
+        r"everyone else is doing it|"
+        r"if you don't, you'll regret it)\b",
+        script,
+    )
+
+    if manipulation:
+        warnings.append(
+            "Potential artificial urgency, coercive framing, or manufactured "
+            "social pressure detected. Review against the ethical guardrails."
+        )
+
+    # -----------------------------------------------------------------------
+    # 12. Approved strategy effectiveness
+    # -----------------------------------------------------------------------
+
+    if selected_strategy_keys is None and strategy_map:
+        selected_strategy_keys = _extract_strategy_keys(strategy_map)
+
+    selected_strategy_keys = selected_strategy_keys or []
+
+    if selected_strategy_keys:
+        strategy_results = _strategy_effectiveness(
+            script,
+            selected_strategy_keys,
+        )
+
+        for result in strategy_results:
+            if result["status"] == "WARNING":
+                warnings.append(result["message"])
+            elif result["status"] == "PASS":
+                passed.append(result["message"])
 
     else:
+        strategy_results = []
 
-        passes.append({
-            "type":
-                "word_count",
-
-            "reason":
-                length_result["reason"],
-        })
-
-    # --------------------------------------------------------
-    # Personal experience
-    # --------------------------------------------------------
-
-    experience_findings = (
-        detect_personal_experience_language(
-            script
-        )
-    )
-
-    if experience_findings:
-
-        critical.extend(
-            [
-                {
-                    "type":
-                        finding["type"],
-
-                    "location":
-                        "detected first-person passage",
-
-                    "problem":
-                        (
-                            "Possible personal experience "
-                            "claim detected."
-                        ),
-
-                    "why_it_matters":
-                        (
-                            "The system must not invent "
-                            "the narrator's experiences."
-                        ),
-
-                    "recommended_action":
-                        (
-                            "Verify that the experience "
-                            "was supplied as source material."
-                        ),
-
-                    "excerpt":
-                        finding["excerpt"],
-                }
-
-                for finding
-                in experience_findings
-            ]
+        warnings.append(
+            "No approved strategy keys were supplied to the validator. "
+            "Strategy effectiveness cannot be checked."
         )
 
+    # -----------------------------------------------------------------------
+    # 13. Outline adherence
+    # -----------------------------------------------------------------------
+
+    outline_result = _check_outline_adherence(script, outline)
+
+    if outline_result["status"] == "CRITICAL":
+        critical.append(outline_result["message"])
+    elif outline_result["status"] == "WARNING":
+        warnings.append(outline_result["message"])
     else:
+        passed.append(outline_result["message"])
 
-        passes.append({
-            "type":
-                "personal_experience",
-
-            "reason":
-                "No obvious first-person experience markers detected.",
-        })
-
-    # --------------------------------------------------------
-    # Ethical risk
-    # --------------------------------------------------------
-
-    ethics_findings = (
-        detect_obvious_ethics_risks(
-            script
-        )
-    )
-
-    if ethics_findings:
-
-        critical.extend(
-            [
-                {
-                    "type":
-                        "obvious_persuasion_risk",
-
-                    "location":
-                        "detected passage",
-
-                    "problem":
-                        (
-                            f"Potentially misleading persuasion "
-                            f"language detected: "
-                            f"{finding['pattern']}"
-                        ),
-
-                    "why_it_matters":
-                        (
-                            "The system should not manufacture "
-                            "certainty or urgency."
-                        ),
-
-                    "recommended_action":
-                        (
-                            "Review the claim and remove "
-                            "unsupported certainty or urgency."
-                        ),
-
-                    "excerpt":
-                        finding["excerpt"],
-                }
-
-                for finding
-                in ethics_findings
-            ]
-        )
-
-    # --------------------------------------------------------
-    # Rhetorical patterns
-    # --------------------------------------------------------
-
-    rhetorical_findings = (
-        detect_rhetorical_patterns(
-            script
-        )
-    )
-
-    for finding in rhetorical_findings:
-
-        if finding["severity"] == "WARNING":
-
-            warnings.append({
-                "type":
-                    "rhetorical_repetition",
-
-                "location":
-                    "multiple locations",
-
-                "problem":
-                    (
-                        f"The pattern "
-                        f"'{finding['pattern']}' "
-                        f"appears {finding['count']} times."
-                    ),
-
-                "why_it_matters":
-                    (
-                        "Repeated templates can make the "
-                        "script feel formulaic."
-                    ),
-
-                "recommended_action":
-                    (
-                        "Rewrite some instances using "
-                        "different sentence structures."
-                    ),
-            })
-
-    # --------------------------------------------------------
-    # Psychology terms
-    # --------------------------------------------------------
-
-    psychology_findings = (
-        detect_psychology_terms(
-            script
-        )
-    )
-
-    if psychology_findings:
-
-        warnings.append({
-            "type":
-                "psychology_review",
-
-            "location":
-                "multiple locations",
-
-            "problem":
-                (
-                    "Psychology terminology was detected "
-                    "and requires semantic review."
-                ),
-
-            "why_it_matters":
-                (
-                    "A named concept should contribute "
-                    "real explanatory value."
-                ),
-
-            "recommended_action":
-                (
-                    "Verify that each concept is explained "
-                    "and materially improves understanding."
-                ),
-
-            "terms":
-                psychology_findings,
-        })
-
-    # --------------------------------------------------------
-    # Open loops
-    # --------------------------------------------------------
-
-    loop_findings = (
-        detect_open_loop_markers(
-            script
-        )
-    )
-
-    for finding in loop_findings:
-
-        if finding["severity"] == "WARNING":
-
-            warnings.append({
-                "type":
-                    "open_loop_density",
-
-                "location":
-                    "multiple locations",
-
-                "problem":
-                    (
-                        f"The marker "
-                        f"'{finding['marker']}' "
-                        f"appears {finding['count']} times."
-                    ),
-
-                "why_it_matters":
-                    (
-                        "Too many unresolved promises can "
-                        "make the viewer feel manipulated "
-                        "or confused."
-                    ),
-
-                "recommended_action":
-                    (
-                        "Review whether every loop has "
-                        "a meaningful payoff."
-                    ),
-            })
-
-    # --------------------------------------------------------
-    # Overall local status
-    # --------------------------------------------------------
+    # -----------------------------------------------------------------------
+    # 14. Final status
+    # -----------------------------------------------------------------------
 
     if critical:
-
-        overall_status = "CRITICAL"
-
+        status = "CRITICAL"
     elif warnings:
-
-        overall_status = "WARNING"
-
+        status = "WARNING"
     else:
+        status = "PASS"
 
-        overall_status = "PASS"
+    if not critical:
+        passed.append(
+            "No deterministic critical failure detected by the validator."
+        )
 
     return {
-
-        "validator_version":
-            VALIDATOR_VERSION,
-
-        "overall_status":
-            overall_status,
-
-        "critical":
-            critical,
-
-        "warnings":
-            warnings,
-
-        "passes":
-            passes,
-
-        "claims":
-            [],
-
-        "strategy_effectiveness":
-            [],
-
-        "open_loops":
-            loop_findings,
-
-        "rhetorical_patterns":
-            rhetorical_findings,
-
-        "emotional_intensity":
-            {},
-
-        "cta":
-            {},
-
-        "ethics":
-            {
-                "local_check":
-                    (
-                        "complete"
-                    ),
-            },
-
-        "structure":
-            {},
-
-        "word_count":
-            length_result,
+        "status": status,
+        "critical": critical,
+        "warnings": warnings,
+        "passed": passed,
+        "word_count": words,
+        "strategy_results": strategy_results,
+        "outline_result": outline_result,
+        "selected_strategy_keys": selected_strategy_keys,
     }
-
-
-# ============================================================
-# COMBINE LOCAL + GEMINI RESULTS
-# ============================================================
-
-def combine_validation_results(
-    local_result,
-    semantic_result,
-):
-    """
-    Combine deterministic and semantic validation.
-
-    CRITICAL always wins.
-
-    WARNING wins over PASS.
-    """
-
-    semantic_result = normalize_validation_result(
-        semantic_result
-    )
-
-    combined = normalize_validation_result(
-        {}
-    )
-
-    combined[
-        "critical"
-    ] = (
-        local_result.get(
-            "critical",
-            []
-        )
-        +
-        semantic_result.get(
-            "critical",
-            []
-        )
-    )
-
-    combined[
-        "warnings"
-    ] = (
-        local_result.get(
-            "warnings",
-            []
-        )
-        +
-        semantic_result.get(
-            "warnings",
-            []
-        )
-    )
-
-    combined[
-        "passes"
-    ] = (
-        local_result.get(
-            "passes",
-            []
-        )
-        +
-        semantic_result.get(
-            "passes",
-            []
-        )
-    )
-
-    combined[
-        "claims"
-    ] = semantic_result.get(
-        "claims",
-        []
-    )
-
-    combined[
-        "strategy_effectiveness"
-    ] = semantic_result.get(
-        "strategy_effectiveness",
-        []
-    )
-
-    combined[
-        "open_loops"
-    ] = semantic_result.get(
-        "open_loops",
-        local_result.get(
-            "open_loops",
-            []
-        ),
-    )
-
-    combined[
-        "rhetorical_patterns"
-    ] = semantic_result.get(
-        "rhetorical_patterns",
-        local_result.get(
-            "rhetorical_patterns",
-            []
-        ),
-    )
-
-    combined[
-        "emotional_intensity"
-    ] = semantic_result.get(
-        "emotional_intensity",
-        {},
-    )
-
-    combined[
-        "cta"
-    ] = semantic_result.get(
-        "cta",
-        {},
-    )
-
-    combined[
-        "ethics"
-    ] = semantic_result.get(
-        "ethics",
-        {},
-    )
-
-    combined[
-        "structure"
-    ] = semantic_result.get(
-        "structure",
-        {},
-    )
-
-    combined[
-        "word_count"
-    ] = local_result.get(
-        "word_count",
-        {},
-    )
-
-    if combined["critical"]:
-
-        combined[
-            "overall_status"
-        ] = "CRITICAL"
-
-    elif combined["warnings"]:
-
-        combined[
-            "overall_status"
-        ] = "WARNING"
-
-    else:
-
-        combined[
-            "overall_status"
-        ] = "PASS"
-
-    return combined
-
-
-# ============================================================
-# DISPLAY SUMMARY
-# ============================================================
-
-def validation_summary(result):
-    """
-    Produce a simple human-readable summary.
-
-    This is for the UI later.
-    """
-
-    result = normalize_validation_result(
-        result
-    )
-
-    return {
-
-        "status":
-            result["overall_status"],
-
-        "critical_count":
-            len(
-                result.get(
-                    "critical",
-                    []
-                )
-            ),
-
-        "warning_count":
-            len(
-                result.get(
-                    "warnings",
-                    []
-                )
-            ),
-
-        "pass_count":
-            len(
-                result.get(
-                    "passes",
-                    []
-                )
-            ),
-    }
-
-
-# ============================================================
-# SELF TEST
-# ============================================================
-
-if __name__ == "__main__":
-
-    test_script = """
-    Imagine you walk
