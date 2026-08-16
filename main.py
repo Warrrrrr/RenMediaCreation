@@ -1831,6 +1831,7 @@ async def strategy_map(
     )
 
     try:
+        control_plane_module.validate_approved_strategy_map(strategy_map)
         claim_register_data = json.loads(claim_register or "{}")
         claims = claim_register_data.get("claims", []) if isinstance(claim_register_data, dict) else []
         control_plane_module.build_claim_register(claims)
@@ -2038,6 +2039,7 @@ async def script(
     )
 
     try:
+        control_plane_module.validate_approved_strategy_map(strategy_map)
         claim_register_data = json.loads(claim_register or "{}")
         claims = claim_register_data.get("claims", []) if isinstance(claim_register_data, dict) else []
         control_plane_module.build_claim_register(claims)

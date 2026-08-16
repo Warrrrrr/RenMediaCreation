@@ -64,6 +64,11 @@ class ControlPlaneTests(unittest.TestCase):
                 }
             ])
 
+    def test_strategy_boundary_rejects_unknown_edited_map(self):
+        with self.assertRaises(ValueError):
+            from control_plane import validate_approved_strategy_map
+            validate_approved_strategy_map({"selected_strategy_ids": ["not_a_real_strategy"]})
+
     def test_validator_accepts_valid_claim_register(self):
         claims = {
             "claims": [
