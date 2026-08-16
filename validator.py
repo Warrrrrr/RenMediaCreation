@@ -113,7 +113,12 @@ def _validate_claim_register_payload(claim_register):
         raise ValueError("Claim register claims must be a list.")
 
     register = ClaimRegister(claims)
-    return validate_claim_register(register)
+    errors = validate_claim_register(register)
+
+    if errors:
+        raise ValueError("Invalid claim register: " + " | ".join(errors))
+
+    return []
 
 
 # =============================================================================
@@ -285,10 +290,7 @@ def validate_script(
     if not governance and governance_rules:
         governance = governance_rules
 
-    register_errors = _validate_claim_register_payload(claim_register)
-    if register_errors:
-        raise ValueError("Invalid claim register: " + " | ".join(register_errors))
-
+    _validate_claim_register_payload(claim_register)
     claim_text = _json_safe(claim_register or {"claims": [], "policy": {}})
 
     prompt = VALIDATION_PROMPT_TEMPLATE.format(
