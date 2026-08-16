@@ -1,6 +1,8 @@
 import json
 import re
 
+from claim_register import validate_claim_register, ClaimRegister
+
 
 # =============================================================================
 # VALIDATOR
@@ -162,6 +164,27 @@ def _build_strategy_instruction(strategy_map):
     )
 
 
+def _validate_claim_register_payload(claim_register):
+    """Validate the claim register without deciding whether claims are true."""
+    if claim_register is None:
+        return []
+    if isinstance(claim_register, str):
+        try:
+            claim_register = json.loads(claim_register)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Claim register must be valid JSON.") from exc
+    if not isinstance(claim_register, dict):
+        raise ValueError("Claim register must be a JSON object.")
+    claims = claim_register.get("claims", [])
+    if not isinstance(claims, list):
+        raise ValueError("Claim register claims must be a list.")
+    register = ClaimRegister(claims)
+    errors = validate_claim_register(register)
+    if errors:
+        raise ValueError("Invalid claim register: " + " | ".join(errors))
+    return []
+
+
 # =============================================================================
 # VALIDATION PROMPT
 # =============================================================================
@@ -207,6 +230,16 @@ GENERATED SCRIPT
 ============================================================
 
 {script}
+
+============================================================
+SOURCE CLAIM REGISTER
+============================================================
+
+{claim_register}
+
+The Claim Register distinguishes what a supplied source says from what has been
+independently verified. Treat independent verification marked "unknown" as unknown.
+Do not classify a source-supported claim as an independently verified fact.
 
 ============================================================
 GOVERNANCE
@@ -375,6 +408,7 @@ def validate_script(
     governance_rules="",
     length_minutes=10,
     target_minutes=None,
+    claim_register=None,
 ):
     """
     Validate a generated script against the approved strategy map.
@@ -399,11 +433,15 @@ def validate_script(
     if target_minutes is not None:
         length_minutes = target_minutes
 
+    _validate_claim_register_payload(claim_register)
+    claim_text = _json_safe(claim_register or {"claims": [], "policy": {}})
+
     prompt = VALIDATION_PROMPT_TEMPLATE.format(
         approved_strategies=approved_text,
         topic=topic,
         outline=outline,
         script=script,
+        claim_register=claim_text,
         governance=governance,
     )
 
