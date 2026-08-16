@@ -1,936 +1,497 @@
 """
-Ren Media V2 — Strategy Selection Engine
+Ren Media — Strategy Engine
 
 Purpose:
-- Select a small number of appropriate strategies for a video.
-- Prevent the entire psychology library from being injected into every prompt.
-- Assign a practical strategy budget.
-- Assign intensity.
-- Detect obvious strategy conflicts.
+Select and rank strategies from the canonical strategy registry.
 
 Important:
-This engine is deterministic.
-It does NOT call Gemini.
-
-Gemini may help analyze the topic, but the final strategy selection
-is controlled here so that the system remains predictable.
+- strategies.py is the single source of truth.
+- This module must not create its own strategy IDs.
+- This module must use the canonical field names from strategies.py.
 """
 
-from strategies import STRATEGIES
+from strategies import (
+    STRATEGIES,
+    validate_strategy_ids,
+)
 
 
-# ============================================================
-# STRATEGY BUDGET
-# ============================================================
+# =============================================================================
+# DEFAULT STRATEGY SELECTION
+# =============================================================================
 
-def calculate_strategy_budget(video_length_minutes):
+# These are canonical IDs from strategies.py only.
+DEFAULT_STRATEGIES = [
+    "curiosity_gaps",
+    "scene_zoom_technique",
+    "point_development",
+    "contrast",
+    "causal_progression",
+]
+
+
+# =============================================================================
+# TOPIC SIGNALS
+# =============================================================================
+
+def _topic_text(topic):
+    return str(topic or "").strip().lower()
+
+
+def _contains_any(text, words):
+    return any(word in text for word in words)
+
+
+# =============================================================================
+# STRATEGY SCORING
+# =============================================================================
+
+def _score_strategy(strategy_id, topic, audience, objective):
     """
-    Establish a reasonable maximum number of active strategies.
+    Lightweight deterministic relevance scoring.
 
     This is intentionally conservative.
+    The engine should select fewer relevant strategies rather than
+    dumping the entire strategy library into every video.
+    """
 
-    The goal is not to maximize the number of psychological
-    techniques. The goal is to make each selected technique
-    useful and noticeable without making the script feel engineered.
+    text = " ".join(
+        [
+            _topic_text(topic),
+            _topic_text(audience),
+            _topic_text(objective),
+        ]
+    )
+
+    score = 0
+
+    if strategy_id == "curiosity_gaps":
+        score += 3
+
+        if _contains_any(
+            text,
+            [
+                "why",
+                "how",
+                "what happens",
+                "secret",
+                "mistake",
+                "reason",
+                "hidden",
+                "actually",
+            ],
+        ):
+            score += 2
+
+    elif strategy_id == "scene_zoom_technique":
+        score += 2
+
+        if _contains_any(
+            text,
+            [
+                "relationship",
+                "dating",
+                "marriage",
+                "communication",
+                "behavior",
+                "conversation",
+                "people",
+                "social",
+            ],
+        ):
+            score += 2
+
+    elif strategy_id == "point_development":
+        score += 3
+
+    elif strategy_id == "contrast":
+        score += 2
+
+        if _contains_any(
+            text,
+            [
+                "difference",
+                "instead",
+                "versus",
+                "vs",
+                "better",
+                "worse",
+                "mistake",
+                "myth",
+            ],
+        ):
+            score += 2
+
+    elif strategy_id == "causal_progression":
+        score += 2
+
+        if _contains_any(
+            text,
+            [
+                "cause",
+                "causes",
+                "why",
+                "leads to",
+                "result",
+                "effect",
+                "impact",
+                "pattern",
+                "consequence",
+            ],
+        ):
+            score += 2
+
+    elif strategy_id == "emotional_triggers":
+        if _contains_any(
+            text,
+            [
+                "love",
+                "relationship",
+                "breakup",
+                "fear",
+                "lonely",
+                "emotion",
+                "trust",
+                "rejection",
+                "attraction",
+            ],
+        ):
+            score += 3
+
+    elif strategy_id == "pattern_interrupts":
+        score += 1
+
+    elif strategy_id == "choice_architecture":
+        if _contains_any(
+            text,
+            [
+                "decision",
+                "choice",
+                "choose",
+                "buy",
+                "behavior",
+                "habit",
+            ],
+        ):
+            score += 3
+
+    elif strategy_id == "small_audience_ask":
+        # CTA is deliberately low priority.
+        score += 1
+
+    return score
+
+
+# =============================================================================
+# CONFLICTS
+# =============================================================================
+
+def _find_conflicts(selected_ids):
+    """
+    Identify obvious strategy conflicts.
+
+    Returns human-readable conflict records.
+    """
+
+    conflicts = []
+
+    selected = set(selected_ids)
+
+    if (
+        "emotional_triggers" in selected
+        and "causal_progression" in selected
+    ):
+        conflicts.append(
+            {
+                "type": "intensity_precision",
+                "strategies": [
+                    "emotional_triggers",
+                    "causal_progression",
+                ],
+                "message": (
+                    "Emotional framing and causal reasoning are both active. "
+                    "Keep emotional language from strengthening causal claims."
+                ),
+            }
+        )
+
+    if (
+        "curiosity_gaps" in selected
+        and "small_audience_ask" in selected
+    ):
+        conflicts.append(
+            {
+                "type": "retention_cta",
+                "strategies": [
+                    "curiosity_gaps",
+                    "small_audience_ask",
+                ],
+                "message": (
+                    "CTA should not interrupt an unresolved curiosity gap."
+                ),
+            }
+        )
+
+    return conflicts
+
+
+# =============================================================================
+# INTENSITY
+# =============================================================================
+
+def _default_intensity(strategy_id):
+    """
+    Conservative default intensity.
+
+    The registry remains authoritative about the recommended range.
+    """
+
+    if strategy_id in {
+        "pattern_interrupts",
+        "small_audience_ask",
+    }:
+        return "LOW"
+
+    if strategy_id in {
+        "curiosity_gaps",
+        "scene_zoom_technique",
+        "contrast",
+        "emotional_triggers",
+    }:
+        return "MEDIUM"
+
+    return "MEDIUM"
+
+
+# =============================================================================
+# BUDGET
+# =============================================================================
+
+def _strategy_budget(length_minutes):
+    """
+    Conservative maximum number of active strategies.
+
+    This prevents the system from turning a short video into a catalogue
+    of techniques.
     """
 
     try:
-        minutes = float(video_length_minutes)
+        length = float(length_minutes)
     except (TypeError, ValueError):
-        minutes = 10
+        length = 10
 
-    if minutes <= 5:
+    if length <= 5:
         return 3
 
-    if minutes <= 8:
-        return 4
-
-    if minutes <= 12:
+    if length <= 10:
         return 5
 
-    if minutes <= 18:
+    if length <= 15:
         return 6
 
     return 7
 
 
-# ============================================================
-# KEYWORD SIGNALS
-# ============================================================
-
-STRATEGY_SIGNALS = {
-
-    "zeigarnik_effect": [
-        "why",
-        "secret",
-        "hidden",
-        "reason",
-        "mistake",
-        "truth",
-        "explained",
-        "reveal",
-    ],
-
-    "curiosity_gaps": [
-        "why",
-        "how",
-        "reason",
-        "hidden",
-        "secret",
-        "mistake",
-        "truth",
-    ],
-
-    "pattern_interrupts": [
-        "mistake",
-        "myth",
-        "wrong",
-        "unexpected",
-        "surprising",
-        "actually",
-    ],
-
-    "emotional_triggers": [
-        "love",
-        "relationship",
-        "breakup",
-        "money",
-        "failure",
-        "success",
-        "fear",
-        "regret",
-        "lonely",
-        "stress",
-        "career",
-    ],
-
-    "self_verification_theory": [
-        "relationship",
-        "dating",
-        "confidence",
-        "identity",
-        "lonely",
-        "rejected",
-        "misunderstood",
-        "social",
-    ],
-
-    "reciprocity": [
-        "guide",
-        "tips",
-        "how to",
-        "help",
-        "learn",
-        "strategy",
-        "steps",
-    ],
-
-    "commitment_consistency": [
-        "habit",
-        "discipline",
-        "change",
-        "improve",
-        "practice",
-        "goal",
-        "routine",
-    ],
-
-    "liking": [
-        "relationship",
-        "dating",
-        "mistake",
-        "story",
-        "personal",
-        "experience",
-    ],
-
-    "authority": [
-        "research",
-        "science",
-        "study",
-        "psychology",
-        "expert",
-        "evidence",
-        "history",
-    ],
-
-    "social_proof": [
-        "people",
-        "popular",
-        "common",
-        "trend",
-        "everyone",
-        "mistake",
-        "behavior",
-    ],
-
-    "scarcity": [
-        "limited",
-        "rare",
-        "exclusive",
-        "availability",
-    ],
-
-    "choice_architecture": [
-        "choice",
-        "decision",
-        "option",
-        "options",
-        "choose",
-        "should i",
-        "which",
-        "compare",
-        "comparison",
-    ],
-
-    "but_and_therefore": [
-        "story",
-        "mistake",
-        "journey",
-        "case study",
-        "what happened",
-        "how it happened",
-    ],
-
-    "scene_visualization": [
-        "imagine",
-        "story",
-        "example",
-        "situation",
-        "relationship",
-        "dating",
-        "work",
-        "conversation",
-    ],
-
-    "point_development": [
-        "why",
-        "how",
-        "guide",
-        "explained",
-        "steps",
-        "mistakes",
-        "things",
-        "reasons",
-    ],
-
-    "point_ordering": [
-        "top",
-        "best",
-        "worst",
-        "mistakes",
-        "reasons",
-        "things",
-        "steps",
-        "ways",
-    ],
-
-    "small_audience_ask": [
-        "opinion",
-        "experience",
-        "agree",
-        "comment",
-    ],
-}
-
-
-# ============================================================
-# DEFAULT ROLES
-# ============================================================
-
-DEFAULT_ROLES = {
-
-    "zeigarnik_effect": "macro attention loop",
-
-    "curiosity_gaps": "micro curiosity",
-
-    "pattern_interrupts": "attention refresh",
-
-    "emotional_triggers": "emotional relevance",
-
-    "self_verification_theory": "audience recognition",
-
-    "reciprocity": "value before ask",
-
-    "commitment_consistency": "action reinforcement",
-
-    "liking": "rapport",
-
-    "authority": "credible evidence",
-
-    "social_proof": "contextual social evidence",
-
-    "scarcity": "genuine rarity",
-
-    "choice_architecture": "decision clarity",
-
-    "but_and_therefore": "narrative causality",
-
-    "scene_visualization": "concrete example",
-
-    "point_development": "complete explanation",
-
-    "point_ordering": "argument progression",
-
-    "small_audience_ask": "low-friction participation",
-}
-
-
-# ============================================================
-# STRATEGY CONFLICTS
-# ============================================================
-
-CONFLICTS = [
-
-    {
-        "strategies": [
-            "scarcity",
-            "emotional_triggers",
-        ],
-        "condition": "high_high",
-        "severity": "warning",
-        "reason":
-            "High scarcity combined with high emotional intensity can create artificial urgency."
-    },
-
-    {
-        "strategies": [
-            "social_proof",
-            "authority",
-        ],
-        "condition": "high_high",
-        "severity": "warning",
-        "reason":
-            "Using both as dominant persuasion devices can make the script feel like an authority stack rather than an explanation."
-    },
-
-    {
-        "strategies": [
-            "zeigarnik_effect",
-            "curiosity_gaps",
-        ],
-        "condition": "both_high",
-        "severity": "warning",
-        "reason":
-            "Both create unresolved information. Using both aggressively can overload the script with open loops."
-    },
-
-    {
-        "strategies": [
-            "pattern_interrupts",
-            "emotional_triggers",
-        ],
-        "condition": "both_high",
-        "severity": "warning",
-        "reason":
-            "Frequent pattern interruption combined with high emotional intensity can make the script feel manufactured."
-    },
-
-    {
-        "strategies": [
-            "scarcity",
-        ],
-        "condition": "informational",
-        "severity": "critical",
-        "reason":
-            "Scarcity should not be selected for ordinary educational content unless genuine scarcity is part of the subject."
-    },
-]
-
-
-# ============================================================
-# HELPERS
-# ============================================================
-
-def normalize_text(*parts):
-    """
-    Combine topic information into one lowercase search string.
-    """
-    return " ".join(
-        str(part or "")
-        for part in parts
-    ).lower().strip()
-
-
-def score_strategy(strategy_key, text):
-    """
-    Calculate a simple deterministic relevance score.
-
-    This is deliberately transparent.
-
-    It does not pretend to understand the topic at a deep semantic level.
-    It simply identifies useful signals and applies conservative rules.
-    """
-
-    signals = STRATEGY_SIGNALS.get(strategy_key, [])
-
-    score = 0
-
-    for signal in signals:
-        if signal.lower() in text:
-            score += 1
-
-    return score
-
-
-def base_priority(strategy_key):
-    """
-    Structural priority.
-
-    Some strategies are useful across many videos, while others
-    should only appear when the topic strongly supports them.
-    """
-
-    priorities = {
-
-        "zeigarnik_effect": 5,
-
-        "curiosity_gaps": 4,
-
-        "pattern_interrupts": 2,
-
-        "emotional_triggers": 3,
-
-        "self_verification_theory": 2,
-
-        "reciprocity": 2,
-
-        "commitment_consistency": 2,
-
-        "liking": 1,
-
-        "authority": 2,
-
-        "social_proof": 1,
-
-        "scarcity": 0,
-
-        "choice_architecture": 2,
-
-        "but_and_therefore": 2,
-
-        "scene_visualization": 3,
-
-        "point_development": 4,
-
-        "point_ordering": 2,
-
-        "small_audience_ask": 1,
-    }
-
-    return priorities.get(strategy_key, 0)
-
-
-def assign_intensity(
-    strategy_key,
-    rank,
-    topic,
-    audience,
-    objective,
-):
-    """
-    Assign LOW / MEDIUM / HIGH.
-
-    High is intentionally difficult to obtain.
-
-    A strategy being relevant does not mean it should dominate.
-    """
-
-    text = normalize_text(
-        topic,
-        audience,
-        objective,
-    )
-
-    # Never make scarcity high by default.
-    if strategy_key == "scarcity":
-        return "LOW"
-
-    # Structural strategies are normally low/medium.
-    if strategy_key in {
-        "point_development",
-        "point_ordering",
-        "but_and_therefore",
-    }:
-        return "MEDIUM"
-
-    # Curiosity can be important but should not dominate.
-    if strategy_key == "zeigarnik_effect":
-        return "MEDIUM"
-
-    if strategy_key == "curiosity_gaps":
-        return "MEDIUM"
-
-    if strategy_key == "emotional_triggers":
-
-        emotional_terms = [
-            "love",
-            "relationship",
-            "breakup",
-            "fear",
-            "loss",
-            "regret",
-            "failure",
-            "lonely",
-            "pain",
-        ]
-
-        matches = sum(
-            1
-            for term in emotional_terms
-            if term in text
-        )
-
-        if matches >= 3:
-            return "MEDIUM"
-
-        return "LOW"
-
-    if strategy_key == "authority":
-        if any(
-            word in text
-            for word in [
-                "research",
-                "science",
-                "study",
-                "evidence",
-                "psychology",
-            ]
-        ):
-            return "MEDIUM"
-
-        return "LOW"
-
-    if strategy_key == "scene_visualization":
-        return "MEDIUM"
-
-    if strategy_key == "self_verification_theory":
-        return "MEDIUM"
-
-    if strategy_key == "choice_architecture":
-        return "MEDIUM"
-
-    return "LOW"
-
-
-# ============================================================
-# CONFLICT DETECTION
-# ============================================================
-
-def detect_conflicts(selected_strategies):
-    """
-    Detect conflicts between selected strategies.
-
-    Returns a list of structured conflict records.
-    """
-
-    selected = {
-        item["strategy"]
-        for item in selected_strategies
-    }
-
-    conflicts = []
-
-    for conflict in CONFLICTS:
-
-        required = set(conflict["strategies"])
-
-        if not required.issubset(selected):
-            continue
-
-        # Single-strategy informational restriction.
-        if conflict["condition"] == "informational":
-            conflicts.append({
-                "severity": conflict["severity"],
-                "strategies": conflict["strategies"],
-                "reason": conflict["reason"],
-            })
-            continue
-
-        intensity = {
-            item["strategy"]: item["intensity"]
-            for item in selected_strategies
-        }
-
-        if conflict["condition"] == "high_high":
-
-            if all(
-                intensity.get(strategy) == "HIGH"
-                for strategy in required
-            ):
-                conflicts.append({
-                    "severity": conflict["severity"],
-                    "strategies": conflict["strategies"],
-                    "reason": conflict["reason"],
-                })
-
-        elif conflict["condition"] == "both_high":
-
-            if all(
-                intensity.get(strategy) == "HIGH"
-                for strategy in required
-            ):
-                conflicts.append({
-                    "severity": conflict["severity"],
-                    "strategies": conflict["strategies"],
-                    "reason": conflict["reason"],
-                })
-
-    return conflicts
-
-
-# ============================================================
-# MAIN ENGINE
-# ============================================================
+# =============================================================================
+# STRATEGY SELECTION
+# =============================================================================
 
 def select_strategies(
     topic,
     audience="",
     objective="",
-    video_length_minutes=10,
+    length_minutes=10,
 ):
     """
-    Select the strategy map for a video.
+    Select a small set of relevant strategies from the canonical registry.
 
-    Inputs:
-        topic
-        audience
-        objective
-        video_length_minutes
-
-    Returns:
-        {
-            "budget": int,
-            "selected": [...],
-            "excluded": [...],
-            "conflicts": [...]
-        }
+    Returns a structured strategy map.
     """
 
-    budget = calculate_strategy_budget(
-        video_length_minutes
-    )
+    # -------------------------------------------------------------------------
+    # Verify registry first.
+    # -------------------------------------------------------------------------
 
-    text = normalize_text(
-        topic,
-        audience,
-        objective,
-    )
+    selected_candidates = []
 
-    candidates = []
+    for strategy_id in STRATEGIES:
 
-    for strategy_key, strategy in STRATEGIES.items():
-
-        score = score_strategy(
-            strategy_key,
-            text,
-        )
-
-        priority = base_priority(
-            strategy_key
-        )
-
-        total_score = (
-            score * 2
-            + priority
-        )
-
-        # Scarcity is deliberately excluded unless
-        # the subject explicitly indicates genuine scarcity.
-        if strategy_key == "scarcity":
-            scarcity_signals = [
-                "limited",
-                "rare",
-                "exclusive",
-                "availability",
-            ]
-
-            if not any(
-                signal in text
-                for signal in scarcity_signals
-            ):
-                total_score = -999
-
-        candidates.append({
-            "strategy": strategy_key,
-            "score": total_score,
-            "signal_score": score,
-            "priority": priority,
-        })
-
-    candidates.sort(
-        key=lambda item: (
-            item["score"],
-            item["priority"],
-        ),
-        reverse=True,
-    )
-
-    # --------------------------------------------------------
-    # Select candidates
-    # --------------------------------------------------------
-
-    selected = []
-
-    for candidate in candidates:
-
-        if len(selected) >= budget:
-            break
-
-        if candidate["score"] <= 0:
-            continue
-
-        strategy_key = candidate["strategy"]
-
-        intensity = assign_intensity(
-            strategy_key,
-            len(selected) + 1,
+        score = _score_strategy(
+            strategy_id,
             topic,
             audience,
             objective,
         )
 
-        selected.append({
-            "strategy": strategy_key,
-            "name": STRATEGIES[strategy_key]["name"],
-            "category": STRATEGIES[strategy_key]["category"],
-            "role": DEFAULT_ROLES.get(
-                strategy_key,
-                "supporting strategy",
-            ),
-            "intensity": intensity,
-            "score": candidate["score"],
-            "locations": STRATEGIES[
-                strategy_key
-            ]["locations"],
-            "desired_response": STRATEGIES[
-                strategy_key
-            ]["desired_response"],
-        })
+        if score > 0:
+            selected_candidates.append(
+                (
+                    strategy_id,
+                    score,
+                )
+            )
 
-    # --------------------------------------------------------
-    # Essential structural strategy
-    # --------------------------------------------------------
-    #
-    # A script needs point development, but we don't want
-    # to allow the engine to crowd out stronger topic-specific
-    # strategies.
-    #
+    # -------------------------------------------------------------------------
+    # Guarantee the core structural strategies if they exist.
+    # -------------------------------------------------------------------------
 
-    if (
-        len(selected) < budget
-        and "point_development"
-        not in {
-            item["strategy"]
-            for item in selected
-        }
-    ):
-        selected.append({
-            "strategy": "point_development",
-            "name": STRATEGIES[
-                "point_development"
-            ]["name"],
-            "category": "structure",
-            "role": DEFAULT_ROLES[
-                "point_development"
-            ],
-            "intensity": "MEDIUM",
-            "score": base_priority(
-                "point_development"
-            ),
-            "locations": STRATEGIES[
-                "point_development"
-            ]["locations"],
-            "desired_response": STRATEGIES[
-                "point_development"
-            ]["desired_response"],
-        })
+    for strategy_id in DEFAULT_STRATEGIES:
 
-    # --------------------------------------------------------
-    # Prevent excessive overlap
-    # --------------------------------------------------------
+        if strategy_id in STRATEGIES:
 
-    selected = reduce_redundancy(
-        selected,
-        budget,
+            existing = [
+                item[0]
+                for item in selected_candidates
+            ]
+
+            if strategy_id not in existing:
+                selected_candidates.append(
+                    (
+                        strategy_id,
+                        _score_strategy(
+                            strategy_id,
+                            topic,
+                            audience,
+                            objective,
+                        ),
+                    )
+                )
+
+    # -------------------------------------------------------------------------
+    # Sort by relevance.
+    # -------------------------------------------------------------------------
+
+    selected_candidates.sort(
+        key=lambda item: item[1],
+        reverse=True,
     )
 
-    conflicts = detect_conflicts(
-        selected
-    )
+    budget = _strategy_budget(length_minutes)
 
-    selected_keys = {
-        item["strategy"]
-        for item in selected
-    }
+    selected_candidates = selected_candidates[:budget]
 
-    excluded = []
-
-    for strategy_key in STRATEGIES:
-
-        if strategy_key not in selected_keys:
-
-            excluded.append({
-                "strategy": strategy_key,
-                "reason": (
-                    "Not selected for this video's "
-                    "current strategy budget."
-                ),
-            })
-
-    return {
-        "budget": budget,
-        "selected": selected,
-        "excluded": excluded,
-        "conflicts": conflicts,
-    }
-
-
-# ============================================================
-# REDUNDANCY CONTROL
-# ============================================================
-
-def reduce_redundancy(
-    selected,
-    budget,
-):
-    """
-    Prevent multiple strategies from doing essentially
-    the same job.
-
-    This is deliberately simple and transparent.
-    """
-
-    groups = [
-        {
-            "zeigarnik_effect",
-            "curiosity_gaps",
-        },
-
-        {
-            "emotional_triggers",
-            "self_verification_theory",
-        },
-
-        {
-            "authority",
-            "social_proof",
-        },
+    selected_ids = [
+        strategy_id
+        for strategy_id, _score in selected_candidates
     ]
 
-    kept = []
+    # -------------------------------------------------------------------------
+    # Strict registry validation.
+    # -------------------------------------------------------------------------
 
-    for item in selected:
+    unknown_ids = validate_strategy_ids(selected_ids)
 
-        current = item["strategy"]
+    if unknown_ids:
+        raise ValueError(
+            f"Strategy engine produced unknown strategy IDs: "
+            f"{unknown_ids}"
+        )
 
-        already_has_group_member = False
+    # -------------------------------------------------------------------------
+    # Build strategy records.
+    # -------------------------------------------------------------------------
 
-        for group in groups:
+    selected = []
 
-            if current not in group:
-                continue
+    for strategy_id, score in selected_candidates:
 
-            for existing in kept:
+        strategy = STRATEGIES[strategy_id]
 
-                if existing["strategy"] in group:
-                    already_has_group_member = True
-                    break
+        selected.append(
+            {
+                "id": strategy_id,
+                "name": strategy["name"],
+                "role": strategy["primary_purpose"],
+                "score": score,
+                "intensity": _default_intensity(strategy_id),
+                "locations": strategy["script_locations"],
+                "desired_viewer_response": (
+                    strategy["desired_viewer_response"]
+                ),
+                "use_when": strategy["use_when"],
+                "do_not_use_when": strategy["do_not_use_when"],
+                "risks": strategy["risks"],
+            }
+        )
 
-            if already_has_group_member:
-                break
+    # -------------------------------------------------------------------------
+    # Conflicts.
+    # -------------------------------------------------------------------------
 
-        if already_has_group_member:
-            continue
+    conflicts = _find_conflicts(selected_ids)
 
-        kept.append(item)
+    # -------------------------------------------------------------------------
+    # Return canonical strategy map.
+    # -------------------------------------------------------------------------
 
-        if len(kept) >= budget:
-            break
+    return {
+        "selected_strategies": selected,
+        "selected_strategy_ids": selected_ids,
+        "budget": budget,
+        "conflicts": conflicts,
+        "excluded_strategy_ids": [
+            strategy_id
+            for strategy_id in STRATEGIES
+            if strategy_id not in selected_ids
+        ],
+    }
 
-    return kept
 
+# =============================================================================
+# ALIASES
+# =============================================================================
 
-# ============================================================
-# HUMAN-READABLE MAP
-# ============================================================
-
-def format_strategy_map(strategy_map):
-    """
-    Convert the structured strategy map into a clean prompt/UI
-    representation.
-    """
-
-    lines = []
-
-    lines.append(
-        f"STRATEGY BUDGET: {strategy_map['budget']}"
+def build_strategy_map(
+    topic,
+    audience="",
+    objective="",
+    length_minutes=10,
+):
+    return select_strategies(
+        topic=topic,
+        audience=audience,
+        objective=objective,
+        length_minutes=length_minutes,
     )
 
-    lines.append("")
-    lines.append("SELECTED STRATEGIES:")
 
-    for index, item in enumerate(
-        strategy_map["selected"],
-        start=1,
-    ):
-
-        lines.append(
-            f"{index}. {item['name']}"
-        )
-
-        lines.append(
-            f"   Key: {item['strategy']}"
-        )
-
-        lines.append(
-            f"   Role: {item['role']}"
-        )
-
-        lines.append(
-            f"   Intensity: {item['intensity']}"
-        )
-
-        lines.append(
-            "   Locations: "
-            + ", ".join(
-                item["locations"]
-            )
-        )
-
-        lines.append(
-            f"   Desired response: "
-            f"{item['desired_response']}"
-        )
-
-    if strategy_map["conflicts"]:
-
-        lines.append("")
-        lines.append("CONFLICTS / WARNINGS:")
-
-        for conflict in strategy_map[
-            "conflicts"
-        ]:
-
-            lines.append(
-                f"- {conflict['severity'].upper()}: "
-                f"{conflict['reason']}"
-            )
-
-    return "\n".join(lines)
-
-
-# ============================================================
-# SIMPLE SELF TEST
-# ============================================================
-
-if __name__ == "__main__":
-
-    example = select_strategies(
-        topic="Why women lose interest fast",
-        audience="adult men",
-        objective="Explain possible relationship and communication patterns",
-        video_length_minutes=10,
+def generate_strategy_map(
+    topic,
+    audience="",
+    objective="",
+    length_minutes=10,
+):
+    return select_strategies(
+        topic=topic,
+        audience=audience,
+        objective=objective,
+        length_minutes=length_minutes,
     )
 
-    print(format_strategy_map(example))
+
+def choose_strategies(
+    topic,
+    audience="",
+    objective="",
+    length_minutes=10,
+):
+    return select_strategies(
+        topic=topic,
+        audience=audience,
+        objective=objective,
+        length_minutes=length_minutes,
+    )
+
+
+def select_strategy_map(
+    topic,
+    audience="",
+    objective="",
+    length_minutes=10,
+):
+    return select_strategies(
+        topic=topic,
+        audience=audience,
+        objective=objective,
+        length_minutes=length_minutes,
+    )
