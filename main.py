@@ -1839,7 +1839,7 @@ async def strategy_map(
         return page(
             f"""
             <p class='critical'>
-              Claim Register validation failed:
+              Control-plane validation failed:
               {esc(exc)}
             </p>
             """
@@ -2047,7 +2047,7 @@ async def script(
         return page(
             f"""
             <p class='critical'>
-              Claim Register validation failed:
+              Control-plane validation failed:
               {esc(exc)}
             </p>
             """
