@@ -1,125 +1,303 @@
 # =============================================================================
 # PSYCHOLOGY TOOLKIT
-# This is the ONLY file you need to touch to add a new psychological /
-# storytelling technique. Add a new entry in this format:
-#     "key": {
-#         "name": "Technique Name",
-#         "explanation": "What it is and why it works.",
-#         "example": "A concrete example of it in use.",
-#     }
-# Nothing in main.py needs to change for a new technique to start being used --
-# it gets pulled in automatically.
+#
+# This remains the source library for psychology, persuasion, behavioral,
+# retention, and storytelling techniques used by the content pipeline.
+#
+# Compatibility:
+# - Existing fields "name", "explanation", and "example" are preserved.
+# - Existing code can continue reading those fields.
+#
+# Strategy metadata:
+# - category
+# - primary_purpose
+# - use_when
+# - do_not_use_when
+# - script_locations
+# - desired_viewer_response
+# - how_to_apply
+# - risks
+# - evidence_requirements
+# - intensity_guidance
+# - repetition_guidance
+#
+# IMPORTANT:
+# A technique being present here does NOT mean it should be used in every
+# script. Strategy selection is a separate step.
 # =============================================================================
 
 PSYCHOLOGY_TECHNIQUES = {
 
-    "zeigarnik_effect": {
-        "name": "Zeigarnik Effect (Macro Open Loop)",
-        "explanation": "People remember unfinished tasks far better than finished ones. An unresolved question creates mental tension that keeps someone engaged until it gets resolved.",
-        "example": "Plant a question early -- \"By the end of this, you'll know the one question her subconscious asks that decides if you're a partner or a friend\" -- and don't answer it until near the end.",
+    'zeigarnik_effect': {
+        'name': 'Zeigarnik Effect (Macro Open Loop)',
+        'explanation': 'People remember unfinished tasks far better than finished ones. An unresolved question creates mental tension that keeps someone engaged until it gets resolved.',
+        'example': 'Plant a question early -- "By the end of this, you\'ll know the one question her subconscious asks that decides if you\'re a partner or a friend" -- and don\'t answer it until near the end.',
+        'category': 'retention',
+        'primary_purpose': 'Create one legitimate unresolved question that gives the viewer a reason to continue.',
+        'use_when': ['The video has a meaningful question with a real later payoff.'],
+        'do_not_use_when': ['There is no worthwhile payoff.', 'The script already has several unresolved questions.'],
+        'script_locations': ['hook', 'early setup', 'major transition'],
+        'desired_viewer_response': 'Curiosity and anticipation.',
+        'how_to_apply': 'Create one important unanswered question, then deliver the promised answer later.',
+        'risks': ['Overuse creates manufactured suspense.', 'Never leave a promised answer unresolved.'],
+        'evidence_requirements': 'Use as a writing/retention technique; do not present it as proof that a specific viewer will keep watching.',
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Usually one major loop per video; additional loops should be smaller and purposeful.',
     },
-
-    "pattern_interrupts": {
-        "name": "Pattern Interrupts",
-        "explanation": "Attention settles into a predictable rhythm and drifts. A sudden shift in tone, rhythm, or subject jolts it back, roughly every 60-90 seconds of runtime.",
-        "example": "Right when an explanation starts feeling like a lecture, cut in with: \"And that's exactly where it goes wrong for most guys.\"",
+    'pattern_interrupts': {
+        'name': 'Pattern Interrupts',
+        'explanation': 'Attention settles into a predictable rhythm and drifts. A sudden shift in tone, rhythm, or subject jolts it back, roughly every 60-90 seconds of runtime.',
+        'example': 'Right when an explanation starts feeling like a lecture, cut in with: "And that\'s exactly where it goes wrong for most guys."',
+        'category': 'retention',
+        'primary_purpose': 'Refresh attention by changing the presentation rhythm.',
+        'use_when': ['The current section has become rhythmically uniform.', 'A new example or perspective naturally changes the mode of delivery.'],
+        'do_not_use_when': ['The viewer is in the middle of an important emotional or explanatory payoff.'],
+        'script_locations': ['transitions', 'mid-video', 'dense explanation'],
+        'desired_viewer_response': 'Renewed attention without breaking comprehension.',
+        'how_to_apply': 'Change the delivery method: example, question, scene, contrast, or concise reset.',
+        'risks': ['Artificial interruption can feel formulaic.', 'Fixed timing targets can become predictable.'],
+        'evidence_requirements': 'Treat timing as a craft heuristic, not a scientifically guaranteed 60–90 second rule.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use only when rhythm genuinely needs a change.',
     },
-
-    "curiosity_gaps": {
-        "name": "Curiosity Gaps (Micro-Loops)",
-        "explanation": "Show enough to make someone want more, withhold enough that they keep watching to close the gap themselves. Used in small doses throughout, alongside the one big Zeigarnik loop.",
-        "example": "\"There's one specific moment where her interest either locks in or quietly disappears -- and it's not the moment you'd guess.\" (don't reveal which moment yet)",
+    'curiosity_gaps': {
+        'name': 'Curiosity Gaps (Micro-Loops)',
+        'explanation': 'Show enough to make someone want more, withhold enough that they keep watching to close the gap themselves. Used in small doses throughout, alongside the one big Zeigarnik loop.',
+        'example': '"There\'s one specific moment where her interest either locks in or quietly disappears -- and it\'s not the moment you\'d guess." (don\'t reveal which moment yet)',
+        'category': 'retention',
+        'primary_purpose': 'Create a small information gap that the video later closes.',
+        'use_when': ['A useful answer can be delayed without withholding essential context.'],
+        'do_not_use_when': ['The withheld information is necessary to understand the current point.', 'The script already has too many open questions.'],
+        'script_locations': ['hook', 'transitions', 'section openings'],
+        'desired_viewer_response': 'Curiosity about a specific unanswered question.',
+        'how_to_apply': 'Reveal enough context to make the question meaningful, then delay only the answer.',
+        'risks': ['Vague teasing.', 'Multiple unanswered questions stacking up.', 'Overpromising.'],
+        'evidence_requirements': 'Use as a narrative device; do not claim that every curiosity gap guarantees retention.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use sparingly; each loop needs a real payoff.',
     },
-
-    "emotional_triggers": {
-        "name": "Emotional Triggers",
-        "explanation": "Connect an idea to a specific emotion -- surprise, nostalgia, pride, mild injustice -- since emotion carries a message further than the message alone.",
-        "example": "\"The frustrating part is most guys correct the wrong thing entirely -- so the harder they try, the worse it gets.\" (mild injustice/frustration)",
+    'emotional_triggers': {
+        'name': 'Emotional Triggers',
+        'explanation': 'Connect an idea to a specific emotion -- surprise, nostalgia, pride, mild injustice -- since emotion carries a message further than the message alone.',
+        'example': '"The frustrating part is most guys correct the wrong thing entirely -- so the harder they try, the worse it gets." (mild injustice/frustration)',
+        'category': 'psychology',
+        'primary_purpose': 'Make an idea emotionally salient and easier to care about.',
+        'use_when': ['The subject has a genuine human consequence.'],
+        'do_not_use_when': ['Emotion would distort the evidence or trivialize a sensitive subject.'],
+        'script_locations': ['hook', 'examples', 'turning points', 'conclusion'],
+        'desired_viewer_response': 'Recognition, concern, surprise, relief, or another relevant emotion.',
+        'how_to_apply': 'Connect the idea to a specific human consequence rather than adding generic dramatic language.',
+        'risks': ['Emotional manipulation.', 'Turning every point into a crisis.'],
+        'evidence_requirements': 'The emotional framing may be creative, but factual claims inside it still require evidence.',
+        'intensity_guidance': 'low_to_medium',
+        'repetition_guidance': 'Vary emotional intensity across the script.',
     },
-
-    "foot_in_the_door_content": {
-        "name": "Foot-in-the-Door (Content)",
-        "explanation": "Early sections introduce small, easy-to-agree-with ideas; later sections build on that agreement to land bigger, more surprising claims.",
-        "example": "Start with something almost everyone agrees with (\"First dates are nerve-wracking\") before building to the bigger claim (\"and that nervous energy is the exact thing sabotaging you\").",
+    'foot_in_the_door_content': {
+        'name': 'Foot-in-the-Door (Content)',
+        'explanation': 'Early sections introduce small, easy-to-agree-with ideas; later sections build on that agreement to land bigger, more surprising claims.',
+        'example': 'Start with something almost everyone agrees with ("First dates are nerve-wracking") before building to the bigger claim ("and that nervous energy is the exact thing sabotaging you").',
+        'category': 'persuasion',
+        'primary_purpose': 'Build understanding progressively from simpler premises to a larger conclusion.',
+        'use_when': ['The later point genuinely follows from the earlier ones.'],
+        'do_not_use_when': ['The later conclusion depends on a leap the earlier agreement cannot justify.'],
+        'script_locations': ['setup', 'early body', 'argument progression'],
+        'desired_viewer_response': 'Increasing agreement and understanding.',
+        'how_to_apply': 'Start with an accessible premise, then build logically toward the larger point.',
+        'risks': ['Manufactured agreement.', 'Using a small agreement to smuggle in an unsupported claim.'],
+        'evidence_requirements': 'Each factual step must remain proportionate to the evidence.',
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Use as a progression pattern, not as a trick in every section.',
     },
-
-    "foot_in_the_door_audience": {
-        "name": "Foot-in-the-Door (Audience)",
-        "explanation": "Place one small, low-friction ask of the viewer roughly two-thirds through -- a small 'yes' primes them to say yes to the bigger subscribe ask at the end. Place it at a natural pause between sections, never during the emotional climax or a tense beat -- interrupting the most gripping moment to ask for a comment breaks immersion right when it matters most.",
-        "example": "\"Comment 'yes' if you've felt this exact thing happen to you.\" (placed as its own beat between two sections, not dropped into the middle of the climax)",
+    'foot_in_the_door_audience': {
+        'name': 'Foot-in-the-Door (Audience)',
+        'explanation': "Place one small, low-friction ask of the viewer roughly two-thirds through -- a small 'yes' primes them to say yes to the bigger subscribe ask at the end. Place it at a natural pause between sections, never during the emotional climax or a tense beat -- interrupting the most gripping moment to ask for a comment breaks immersion right when it matters most.",
+        'example': '"Comment \'yes\' if you\'ve felt this exact thing happen to you." (placed as its own beat between two sections, not dropped into the middle of the climax)',
+        'category': 'persuasion',
+        'primary_purpose': 'Use a small, voluntary audience action before a later, larger action.',
+        'use_when': ['A small action genuinely adds value or participation.'],
+        'do_not_use_when': ['It interrupts a critical reveal or emotional climax.', 'The action is merely engagement bait.'],
+        'script_locations': ['natural section break', 'late-middle', 'CTA'],
+        'desired_viewer_response': 'Low-friction participation.',
+        'how_to_apply': 'Ask for one small, relevant action at a natural pause.',
+        'risks': ['Manipulative engagement bait.', 'Breaking immersion.'],
+        'evidence_requirements': 'Do not state that a comment guarantees a later subscription or behavior.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Usually one small ask per video.',
     },
-
-    "self_verification_theory": {
-        "name": "Self-Verification Theory",
-        "explanation": "Before introducing a new idea, validate the viewer's current experience or struggle so they feel seen and correctly understood -- this builds the trust needed for them to accept what comes next.",
-        "example": "\"You've probably done everything right on paper and still watched it fall apart -- that's not you doing something wrong. That's a completely different problem.\"",
+    'self_verification_theory': {
+        'name': 'Self-Verification Theory',
+        'explanation': "Before introducing a new idea, validate the viewer's current experience or struggle so they feel seen and correctly understood -- this builds the trust needed for them to accept what comes next.",
+        'example': '"You\'ve probably done everything right on paper and still watched it fall apart -- that\'s not you doing something wrong. That\'s a completely different problem."',
+        'category': 'psychology',
+        'primary_purpose': 'Help viewers recognize their experience before introducing a new interpretation.',
+        'use_when': ['The audience may feel misunderstood, blamed, or defensive.'],
+        'do_not_use_when': ["The script would need to pretend to know the viewer's private experience."],
+        'script_locations': ['opening', 'setup', 'major reframing'],
+        'desired_viewer_response': 'Recognition and openness to the explanation.',
+        'how_to_apply': 'Describe a plausible experience carefully, then introduce the new interpretation.',
+        'risks': ['Overgeneralizing about the viewer.', 'Turning a theory into a diagnosis.'],
+        'evidence_requirements': "Keep the theory accurately framed; do not claim it explains every viewer's behavior.",
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Use when the audience needs reframing, not in every section.',
     },
-
-    "choice_architecture": {
-        "name": "Choice Architecture (Nudge)",
-        "explanation": "Don't tell the viewer what to conclude -- frame the surrounding context so their own reasoning arrives at the intended conclusion.",
-        "example": "\"One version of you replies in three seconds, every time. Another version has a life that occasionally makes her wait. Only one of those people gets missed.\" (never says \"stop texting back so fast\" directly)",
+    'choice_architecture': {
+        'name': 'Choice Architecture (Nudge)',
+        'explanation': "Don't tell the viewer what to conclude -- frame the surrounding context so their own reasoning arrives at the intended conclusion.",
+        'example': '"One version of you replies in three seconds, every time. Another version has a life that occasionally makes her wait. Only one of those people gets missed." (never says "stop texting back so fast" directly)',
+        'category': 'behavioral',
+        'primary_purpose': 'Shape how options are presented so the intended action is easier to understand.',
+        'use_when': ['The content includes a genuine choice or action.'],
+        'do_not_use_when': ['The goal is to hide important alternatives or manipulate the viewer.'],
+        'script_locations': ['decision points', 'CTA', 'practical advice'],
+        'desired_viewer_response': 'Clearer decision-making with preserved choice.',
+        'how_to_apply': 'Present relevant options, consequences, and the easiest sensible next step without hiding alternatives.',
+        'risks': ['Manipulative framing.', 'Dark-pattern behavior.'],
+        'evidence_requirements': 'Do not claim a nudge will reliably produce a particular behavior.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use when a decision actually exists.',
     },
-
-    "scene_zoom_technique": {
-        "name": "Zoom Into the Moment",
-        "explanation": "When telling a scene or example, drop the wide 'helicopter view' summary and zoom into one specific moment using five elements: Location (name where you physically are), Actions (active verbs -- what's physically happening), Thoughts (raw, unfiltered internal monologue, not formal), Emotions (show the physical reaction, not just naming the feeling), and Dialogue (quote what was actually said).",
-        "example": "Not \"she seemed disappointed\" but: \"She's standing in the doorway, one hand still on the frame, and she just says, 'Oh. I thought you'd remember.' Then she looks down at her phone instead of at you.\"",
+    'scene_zoom_technique': {
+        'name': 'Zoom Into the Moment',
+        'explanation': "When telling a scene or example, drop the wide 'helicopter view' summary and zoom into one specific moment using five elements: Location (name where you physically are), Actions (active verbs -- what's physically happening), Thoughts (raw, unfiltered internal monologue, not formal), Emotions (show the physical reaction, not just naming the feeling), and Dialogue (quote what was actually said).",
+        'example': 'Not "she seemed disappointed" but: "She\'s standing in the doorway, one hand still on the frame, and she just says, \'Oh. I thought you\'d remember.\' Then she looks down at her phone instead of at you."',
+        'category': 'storytelling',
+        'primary_purpose': 'Turn an abstract idea into a concrete, visual human moment.',
+        'use_when': ['A concept would become clearer through a specific scene.'],
+        'do_not_use_when': ["A scene would require inventing a real person's experience."],
+        'script_locations': ['examples', 'case illustrations', 'turning points'],
+        'desired_viewer_response': 'Recognition and vivid understanding.',
+        'how_to_apply': 'Use location, actions, thoughts, physical reactions, and dialogue; label invented scenarios honestly as examples.',
+        'risks': ['Fabricated personal anecdotes.', 'Overly cinematic filler.'],
+        'evidence_requirements': 'If the scene represents a real event or study, factual details must come from the source.',
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Use for the most important examples rather than every point.',
     },
-
-    # --- Robert Cialdini's six principles of influence ---
-    # Authority and Social Proof carry a real fabrication risk (see caution
-    # baked into each) since "invoking authority" in text tends to tempt
-    # invented-sounding citations. The other four are lower-risk.
-
-    "cialdini_reciprocity": {
-        "name": "Reciprocity (Cialdini)",
-        "explanation": "People feel obligated to return value once they've received it first. Give the viewer something genuinely useful early, for free, before any ask.",
-        "example": "Deliver one complete, standalone insight in the first third of the video that works even if someone stops watching there -- the value comes before the ask, not after.",
+    'cialdini_reciprocity': {
+        'name': 'Reciprocity (Cialdini)',
+        'explanation': "People feel obligated to return value once they've received it first. Give the viewer something genuinely useful early, for free, before any ask.",
+        'example': 'Deliver one complete, standalone insight in the first third of the video that works even if someone stops watching there -- the value comes before the ask, not after.',
+        'category': 'persuasion',
+        'primary_purpose': 'Provide genuine value before making a reasonable request.',
+        'use_when': ['The creator has something genuinely useful to give the viewer.'],
+        'do_not_use_when': ['Value is given only to pressure the viewer into an unrelated action.'],
+        'script_locations': ['early value delivery', 'CTA'],
+        'desired_viewer_response': 'Perceived value and goodwill.',
+        'how_to_apply': 'Give a useful, standalone insight before asking for anything.',
+        'risks': ['Transactional manipulation.'],
+        'evidence_requirements': 'Claims inside the useful content still require evidence.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Usually one clear value-before-ask sequence.',
     },
-
-    "cialdini_commitment_consistency": {
-        "name": "Commitment & Consistency (Cialdini)",
-        "explanation": "Once someone states or commits to a small position, they feel internal pressure to stay consistent with it going forward.",
-        "example": "The audience foot-in-the-door comment ask doubles as this -- once someone has publicly typed 'yes,' they're primed to keep agreeing with the direction the rest of the video takes.",
+    'cialdini_commitment_consistency': {
+        'name': 'Commitment & Consistency (Cialdini)',
+        'explanation': 'Once someone states or commits to a small position, they feel internal pressure to stay consistent with it going forward.',
+        'example': "The audience foot-in-the-door comment ask doubles as this -- once someone has publicly typed 'yes,' they're primed to keep agreeing with the direction the rest of the video takes.",
+        'category': 'persuasion',
+        'primary_purpose': 'Encourage follow-through on a voluntary, relevant commitment.',
+        'use_when': ["A small commitment naturally supports the video's goal."],
+        'do_not_use_when': ['The commitment is used to pressure the viewer into unrelated conclusions.'],
+        'script_locations': ['practical exercise', 'CTA'],
+        'desired_viewer_response': 'Willing participation or follow-through.',
+        'how_to_apply': 'Invite a small, meaningful commitment and explain why it matters.',
+        'risks': ['Using commitment to manufacture agreement.'],
+        'evidence_requirements': 'Do not claim that a small action guarantees later compliance.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use one meaningful commitment rather than repeated asks.',
     },
-
-    "cialdini_liking": {
-        "name": "Liking (Cialdini)",
-        "explanation": "People are more persuaded by voices they like or relate to. A brief, relatable, slightly self-deprecating admission builds this before the argument lands.",
-        "example": "\"I got this completely wrong for years before I understood it\" -- one line, not a full personal-story detour.",
+    'cialdini_liking': {
+        'name': 'Liking (Cialdini)',
+        'explanation': 'People are more persuaded by voices they like or relate to. A brief, relatable, slightly self-deprecating admission builds this before the argument lands.',
+        'example': '"I got this completely wrong for years before I understood it" -- one line, not a full personal-story detour.',
+        'category': 'persuasion',
+        'primary_purpose': 'Build rapport through genuine relatability and warmth.',
+        'use_when': ["The creator's perspective benefits from a human, relatable voice."],
+        'do_not_use_when': ['It requires inventing personal history or fake vulnerability.'],
+        'script_locations': ['opening', 'reframe', 'transition'],
+        'desired_viewer_response': 'Trust and relatability.',
+        'how_to_apply': 'Use truthful, relevant relatability; never invent personal experience.',
+        'risks': ['Fabricated autobiography.', 'Performative vulnerability.'],
+        'evidence_requirements': 'Any real personal claim must come from user-supplied facts.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use lightly; too much becomes performative.',
     },
-
-    "cialdini_scarcity": {
-        "name": "Scarcity (Cialdini)",
-        "explanation": "Things seem more valuable when they're rare, hard to find, or not widely known -- pairs naturally with the Forbidden and Warning title frames.",
-        "example": "\"This is the one adjustment almost nobody teaches, because it's not the flashy part.\"",
+    'cialdini_scarcity': {
+        'name': 'Scarcity (Cialdini)',
+        'explanation': "Things seem more valuable when they're rare, hard to find, or not widely known -- pairs naturally with the Forbidden and Warning title frames.",
+        'example': '"This is the one adjustment almost nobody teaches, because it\'s not the flashy part."',
+        'category': 'persuasion',
+        'primary_purpose': 'Highlight a genuine limitation, rarity, or constrained opportunity.',
+        'use_when': ['The limitation is real.'],
+        'do_not_use_when': ['Scarcity is invented.', 'The content is ordinary but framed as secret or forbidden solely to create urgency.'],
+        'script_locations': ['title', 'offer', 'CTA'],
+        'desired_viewer_response': 'Salience about a genuinely limited option.',
+        'how_to_apply': 'State the real limitation precisely.',
+        'risks': ['Fake scarcity.', 'False urgency.', 'Deceptive clickbait.'],
+        'evidence_requirements': 'The scarcity claim itself must be true.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use only where a genuine limitation exists.',
     },
-
-    "cialdini_authority": {
-        "name": "Authority (Cialdini)",
-        "explanation": "People defer to credible expertise. IMPORTANT: never invent a specific named study, researcher, or credential to manufacture this -- use soft, generic phrasing only. A fabricated citation is worse for credibility than none at all.",
-        "example": "\"Most people who study attraction professionally will tell you the same thing\" -- not \"a Harvard study found...\" unless that study is real and verifiable.",
+    'cialdini_authority': {
+        'name': 'Authority (Cialdini)',
+        'explanation': 'People defer to credible expertise. IMPORTANT: never invent a specific named study, researcher, or credential to manufacture this -- use soft, generic phrasing only. A fabricated citation is worse for credibility than none at all.',
+        'example': '"Most people who study attraction professionally will tell you the same thing" -- not "a Harvard study found..." unless that study is real and verifiable.',
+        'category': 'persuasion',
+        'primary_purpose': 'Increase credibility through legitimate expertise or evidence.',
+        'use_when': ['The topic benefits from credible expertise or research.'],
+        'do_not_use_when': ['No credible source is available.', 'The model would need to invent credentials or studies.'],
+        'script_locations': ['evidence sections', 'major factual claims'],
+        'desired_viewer_response': 'Appropriate confidence in a well-supported claim.',
+        'how_to_apply': 'Name or summarize real sources only when verified; otherwise use neutral wording.',
+        'risks': ['Fabricated credentials.', 'Fabricated studies.', 'False consensus.'],
+        'evidence_requirements': 'High. Source required for named authority claims.',
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Use where credibility is genuinely needed.',
     },
-
-    "cialdini_social_proof": {
-        "name": "Social Proof (Cialdini)",
-        "explanation": "People look to others' behavior to decide their own. IMPORTANT: never invent specific statistics or numbers to manufacture this -- use soft, generic phrasing only.",
-        "example": "\"This pattern shows up constantly, in relationship after relationship\" -- not \"87% of women reported...\" unless that statistic is real and verifiable.",
+    'cialdini_social_proof': {
+        'name': 'Social Proof (Cialdini)',
+        'explanation': "People look to others' behavior to decide their own. IMPORTANT: never invent specific statistics or numbers to manufacture this -- use soft, generic phrasing only.",
+        'example': '"This pattern shows up constantly, in relationship after relationship" -- not "87% of women reported..." unless that statistic is real and verifiable.',
+        'category': 'persuasion',
+        'primary_purpose': 'Show that a behavior, observation, or idea has genuine support or prevalence.',
+        'use_when': ['Reliable evidence or real examples support the claim.'],
+        'do_not_use_when': ['Popularity is unknown.', 'Consensus would need to be fabricated.'],
+        'script_locations': ['evidence', 'examples', 'CTA'],
+        'desired_viewer_response': 'Context about how widely an idea or behavior is supported or observed.',
+        'how_to_apply': 'Use verified statistics, documented examples, or accurately described patterns.',
+        'risks': ['Fake numbers.', 'Fake popularity.', 'Fake consensus.'],
+        'evidence_requirements': 'High for numerical or consensus claims.',
+        'intensity_guidance': 'low_to_medium',
+        'repetition_guidance': 'Use only when actual social evidence matters.',
     },
-
-    "point_development": {
-        "name": "Full Point Development (Context / Application / Framing)",
-        "explanation": "Never state a point and move straight to the next one -- that's what makes a script feel rushed even when it's long. Develop every point in three parts: Context (what it is, plainly), Application (how it actually plays out, with one concrete example), and Framing (why it matters / how it connects to the bigger argument). Only move on once all three are present.",
-        "example": "Not just \"women test emotional stability and move on\" -- Context: \"there's a subconscious safety test running underneath every date.\" Application: \"it shows up as something as small as staying quiet for three seconds.\" Framing: \"because passing it is what answers the one question that decides partner versus friend.\"",
+    'point_development': {
+        'name': 'Full Point Development (Context / Application / Framing)',
+        'explanation': "Never state a point and move straight to the next one -- that's what makes a script feel rushed even when it's long. Develop every point in three parts: Context (what it is, plainly), Application (how it actually plays out, with one concrete example), and Framing (why it matters / how it connects to the bigger argument). Only move on once all three are present.",
+        'example': 'Not just "women test emotional stability and move on" -- Context: "there\'s a subconscious safety test running underneath every date." Application: "it shows up as something as small as staying quiet for three seconds." Framing: "because passing it is what answers the one question that decides partner versus friend."',
+        'category': 'storytelling',
+        'primary_purpose': 'Prevent shallow coverage by fully developing a major point before moving on.',
+        'use_when': ['A point is important enough to require explanation, example, and framing.'],
+        'do_not_use_when': ['The point is trivial or repeating material already established.'],
+        'script_locations': ['major body sections'],
+        'desired_viewer_response': 'Clear understanding rather than the feeling of being rushed.',
+        'how_to_apply': 'Use context, application, and framing; stop when the point is sufficiently understood.',
+        'risks': ['Filler added to satisfy a word count.'],
+        'evidence_requirements': 'Examples and factual claims must remain accurate.',
+        'intensity_guidance': 'medium',
+        'repetition_guidance': 'Apply to major points, not every sentence.',
     },
-
-    "point_ordering": {
-        "name": "Point Ordering (Second-Best First)",
-        "explanation": "When a section has multiple sequential points or examples, don't open with the single strongest one -- lead with the second-strongest, so the next point feels like an escalation instead of a letdown. This creates a rising pattern instead of one that peaks early and coasts.",
-        "example": "With three supporting examples of an idea, order them strong, strongest, then a lighter closing one that ties everything together -- never strongest first.",
+    'point_ordering': {
+        'name': 'Point Ordering (Second-Best First)',
+        'explanation': "When a section has multiple sequential points or examples, don't open with the single strongest one -- lead with the second-strongest, so the next point feels like an escalation instead of a letdown. This creates a rising pattern instead of one that peaks early and coasts.",
+        'example': 'With three supporting examples of an idea, order them strong, strongest, then a lighter closing one that ties everything together -- never strongest first.',
+        'category': 'storytelling',
+        'primary_purpose': 'Arrange multiple supporting points so the section develops rather than peaks immediately.',
+        'use_when': ['Several comparable points or examples need ordering.'],
+        'do_not_use_when': ['Evidence strength or logical priority requires a different order.'],
+        'script_locations': ['multi-point sections'],
+        'desired_viewer_response': 'A sense of progression and escalation.',
+        'how_to_apply': 'Usually place a strong point before the strongest point, but preserve logical and evidentiary order when it matters more.',
+        'risks': ['Artificial ordering that weakens the argument.'],
+        'evidence_requirements': 'Evidence hierarchy takes priority over retention heuristics.',
+        'intensity_guidance': 'low',
+        'repetition_guidance': 'Use when ordering genuinely improves progression.',
     },
-
-
-    # Add new techniques below this line:
 }
