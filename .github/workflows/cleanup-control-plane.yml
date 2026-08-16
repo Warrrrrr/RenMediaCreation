@@ -1,0 +1,130 @@
+name: One-time Claim Register cleanup
+
+on:
+  push:
+    branches: ["agent/control-plane-hardening"]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: contains(github.event.head_commit.message, '[cleanup-control-plane]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore noisy files from main
+        run: |
+          git fetch origin main
+          git checkout origin/main -- main.py validator.py
+
+      - name: Apply only Claim Register integration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          p = Path('main.py')
+          text = p.read_text()
+
+          text = once(
+              text,
+              '    QuotaExceededError,\n)\n',
+              '    QuotaExceededError,\n)\nfrom claim_pipeline import extract_claim_register\n',
+              'main import',
+          )
+          text = once(
+              text,
+              'validator_module = importlib.import_module("validator")\n',
+              'validator_module = importlib.import_module("validator")\ncontrol_plane_module = importlib.import_module("control_plane")\n',
+              'control-plane import',
+          )
+          text = once(
+              text,
+              '    strategy_map,\n    length_minutes,\n):\n',
+              '    strategy_map,\n    length_minutes,\n    claim_register=None,\n):\n',
+              'validator signature',
+          )
+          text = once(
+              text,
+              '        "governance_rules": governance_text,\n        "length_minutes": length_minutes,\n',
+              '        "governance_rules": governance_text,\n        "claim_register": claim_register,\n        "claims": claim_register,\n        "length_minutes": length_minutes,\n',
+              'validator values',
+          )
+          text = once(
+              text,
+              'APPROVED STRATEGY MAP:\n{strategy_map}\n\nGOVERNANCE:',
+              'APPROVED STRATEGY MAP:\n{strategy_map}\n\nCLAIM REGISTER:\n{claim_register}\n\nTreat the claim register as the evidence boundary. Do not upgrade\nsource claims into independently verified facts.\n\nGOVERNANCE:',
+              'outline claim prompt',
+          )
+          text = once(
+              text,
+              'APPROVED OUTLINE:\n{outline}\n\nGOVERNANCE:',
+              'APPROVED OUTLINE:\n{outline}\n\nCLAIM REGISTER:\n{claim_register}\n\nTreat the claim register as the evidence boundary. Do not upgrade\nsource claims into independently verified facts.\n\nGOVERNANCE:',
+              'script claim prompt',
+          )
+          text = once(
+              text,
+              '        frame_stacking_note=FRAME_STACKING_NOTE,\n    )',
+              '        frame_stacking_note=FRAME_STACKING_NOTE,\n        claim_register=claim_register,\n    )',
+              'analysis prompt call',
+          )
+
+          source_end = '''    else:\n\n        return page(\n            "<p class='critical'>"\n            "Unknown input type."\n            "</p>"\n        )\n\n'''
+          source_new = source_end + '''    try:\n        claim_register = extract_claim_register(source_context)\n    except Exception as exc:\n        return page(\n            f"""\n            <p class='critical'>\n              Claim Register extraction failed:\n              {esc(exc)}\n            </p>\n            """\n        )\n\n'''
+          text = once(text, source_end, source_new, 'claim extraction')
+
+          text = once(
+              text,
+              '          value="{esc(source_context)}"\n        >\n\n        <input\n          type="hidden"\n          name="creative_direction"',
+              '          value="{esc(source_context)}"\n        >\n\n        <input\n          type="hidden"\n          name="claim_register"\n          value="{esc(_json_safe(claim_register))}"\n        >\n\n        <input\n          type="hidden"\n          name="creative_direction"',
+              'analysis claim hidden field',
+          )
+
+          sig = '    source_context: str = Form(""),\n    creative_direction: str = Form(""),\n'
+          text = once(text, sig, '    source_context: str = Form(""),\n    claim_register: str = Form("{}"),\n    creative_direction: str = Form(""),\n', 'strategy form signature')
+          text = once(text, sig, '    source_context: str = Form(""),\n    claim_register: str = Form("{}"),\n    creative_direction: str = Form(""),\n', 'script form signature')
+
+          marker = '''    word_target = int(\n        length * WORDS_PER_MINUTE\n    )\n\n'''
+          validation = marker + '''    try:\n        claim_register_data = json.loads(claim_register or "{}")\n        claims = claim_register_data.get("claims", []) if isinstance(claim_register_data, dict) else []\n        control_plane_module.build_claim_register(claims)\n    except Exception as exc:\n        return page(\n            f"""\n            <p class='critical'>\n              Claim Register validation failed:\n              {esc(exc)}\n            </p>\n            """\n        )\n\n'''
+          text = once(text, marker, validation, 'strategy claim validation')
+          text = once(text, marker, validation, 'script claim validation')
+
+          text = once(text, '        strategy_map=strategy_map,\n        governance=governance_text,\n', '        strategy_map=strategy_map,\n        claim_register=claim_register,\n        governance=governance_text,\n', 'outline claim argument')
+          text = once(text, '        strategy_map=strategy_map,\n        outline=outline,\n        governance=governance_text,\n', '        strategy_map=strategy_map,\n        outline=outline,\n        claim_register=claim_register,\n        governance=governance_text,\n', 'script claim argument')
+          text = once(text, '            strategy_map=strategy_map,\n            length_minutes=length,\n', '            strategy_map=strategy_map,\n            length_minutes=length,\n            claim_register=claim_register,\n', 'validation claim argument')
+          text = once(text, '          value="{esc(source_context)}"\n          >\n\n          <input\n            type="hidden"\n            name="creative_direction"', '          value="{esc(source_context)}"\n          >\n\n          <input\n            type="hidden"\n            name="claim_register"\n            value="{esc(claim_register)}"\n          >\n\n          <input\n            type="hidden"\n            name="creative_direction"', 'outline claim hidden field')
+
+          p.write_text(text)
+
+          p = Path('validator.py')
+          text = p.read_text()
+          text = once(text, 'import json\nimport re\n\n', 'import json\nimport re\n\nfrom claim_register import validate_claim_register, ClaimRegister\n\n', 'validator import')
+          anchor = '\n\n# =============================================================================\n# VALIDATION PROMPT\n# =============================================================================\n'
+          helper = '''\n\ndef _validate_claim_register_payload(claim_register):\n    """Validate the claim register without deciding whether claims are true."""\n    if claim_register is None:\n        return []\n    if isinstance(claim_register, str):\n        try:\n            claim_register = json.loads(claim_register)\n        except json.JSONDecodeError as exc:\n            raise ValueError("Claim register must be valid JSON.") from exc\n    if not isinstance(claim_register, dict):\n        raise ValueError("Claim register must be a JSON object.")\n    claims = claim_register.get("claims", [])\n    if not isinstance(claims, list):\n        raise ValueError("Claim register claims must be a list.")\n    register = ClaimRegister(claims)\n    errors = validate_claim_register(register)\n    if errors:\n        raise ValueError("Invalid claim register: " + " | ".join(errors))\n    return []\n'''
+          text = once(text, anchor, helper + anchor, 'validator helper')
+          text = once(text, '{script}\n\n============================================================\nGOVERNANCE', '{script}\n\n============================================================\nSOURCE CLAIM REGISTER\n============================================================\n\n{claim_register}\n\nThe Claim Register distinguishes what a supplied source says from what has been\nindependently verified. Treat independent verification marked "unknown" as unknown.\nDo not classify a source-supported claim as an independently verified fact.\n\n============================================================\nGOVERNANCE', 'validator claim prompt')
+          text = once(text, '    target_minutes=None,\n):', '    target_minutes=None,\n    claim_register=None,\n):', 'validator claim signature')
+          text = once(text, '    if target_minutes is not None:\n        length_minutes = target_minutes\n\n    prompt = VALIDATION_PROMPT_TEMPLATE.format(', '    if target_minutes is not None:\n        length_minutes = target_minutes\n\n    _validate_claim_register_payload(claim_register)\n    claim_text = _json_safe(claim_register or {"claims": [], "policy": {}})\n\n    prompt = VALIDATION_PROMPT_TEMPLATE.format(', 'validator claim check')
+          text = once(text, '        script=script,\n        governance=governance,', '        script=script,\n        claim_register=claim_text,\n        governance=governance,', 'validator claim argument')
+          p.write_text(text)
+          PY
+
+      - name: Verify and commit
+        run: |
+          python -m py_compile main.py validator.py claim_pipeline.py control_plane.py
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.py validator.py
+          git rm .github/workflows/cleanup-control-plane.yml
+          git commit -m "Clean Claim Register control-plane diff"
+          git push
