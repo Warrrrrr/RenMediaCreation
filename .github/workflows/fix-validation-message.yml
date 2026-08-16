@@ -30,5 +30,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add main.py .github/workflows/fix-validation-message.yml
-          git commit -m "Clarify control-plane validation error" 
+          git commit -m "Clarify control-plane validation error"
           git push
