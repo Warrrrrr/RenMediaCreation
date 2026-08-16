@@ -1,11 +1,13 @@
 import unittest
 
+from claim_register import ClaimRegister, validate_claim_register
 from control_plane import (
     build_claim_register,
     canonical_strategy_ids,
     deterministic_script_checks,
     validate_approved_strategy_map,
 )
+from validator import _validate_claim_register_payload
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -61,6 +63,35 @@ class ControlPlaneTests(unittest.TestCase):
                     "safe_script_status": "allowed_as_verified_fact",
                 }
             ])
+
+    def test_validator_accepts_valid_claim_register(self):
+        claims = {
+            "claims": [
+                {
+                    "claim_id": "SRC-001",
+                    "claim": "The supplied source reports X.",
+                    "source_support": "source_supported",
+                    "independent_verification": "unknown",
+                    "safe_script_status": "source_attribution_required",
+                }
+            ]
+        }
+        self.assertEqual(_validate_claim_register_payload(claims), [])
+
+    def test_validator_rejects_claim_register_that_upgrades_source_to_fact(self):
+        claims = {
+            "claims": [
+                {
+                    "claim_id": "SRC-001",
+                    "claim": "The supplied source reports X.",
+                    "source_support": "source_supported",
+                    "independent_verification": "unknown",
+                    "safe_script_status": "allowed_as_verified_fact",
+                }
+            ]
+        }
+        with self.assertRaises(ValueError):
+            _validate_claim_register_payload(claims)
 
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
