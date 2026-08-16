@@ -1272,7 +1272,9 @@ async def home():
           <br>
 
           <label>
-            <strong>What do you want to make from it?</strong>
+            <strong>
+              What do you want to make from it?
+            </strong>
           </label>
 
           <textarea
@@ -1284,7 +1286,9 @@ async def home():
           <br>
 
           <label>
-            <strong>Target length in minutes</strong>
+            <strong>
+              Target length in minutes
+            </strong>
           </label>
 
           <input
@@ -1309,11 +1313,9 @@ async def home():
 
       <div class="card">
 
-        <h3>Video inspiration</h3>
-
-        <p class="muted">
-          Use a public YouTube video only as inspiration for a genuinely different angle.
-        </p>
+        <h3>
+          Use a YouTube video as inspiration
+        </h3>
 
         <form
           method="post"
@@ -1322,15 +1324,14 @@ async def home():
 
           <input
             name="video_url"
-            type="url"
-            placeholder="https://www.youtube.com/watch?v=..."
+            placeholder="https://youtube.com/watch?v=..."
             required
           >
 
           <br><br>
 
           <button type="submit">
-            Find a Different Angle
+            Find New Angle
           </button>
 
         </form>
@@ -1489,13 +1490,8 @@ async def analyze(
         )
 
     try:
-
-        claim_register = extract_claim_register(
-            source_context
-        )
-
+        claim_register = extract_claim_register(source_context)
     except Exception as exc:
-
         return page(
             f"""
             <p class='critical'>
@@ -1835,23 +1831,10 @@ async def strategy_map(
     )
 
     try:
-
-        claim_register_data = json.loads(
-            claim_register or "{}"
-        )
-
-        claims = (
-            claim_register_data.get("claims", [])
-            if isinstance(claim_register_data, dict)
-            else []
-        )
-
-        control_plane_module.build_claim_register(
-            claims
-        )
-
+        claim_register_data = json.loads(claim_register or "{}")
+        claims = claim_register_data.get("claims", []) if isinstance(claim_register_data, dict) else []
+        control_plane_module.build_claim_register(claims)
     except Exception as exc:
-
         return page(
             f"""
             <p class='critical'>
@@ -2055,23 +2038,10 @@ async def script(
     )
 
     try:
-
-        claim_register_data = json.loads(
-            claim_register or "{}"
-        )
-
-        claims = (
-            claim_register_data.get("claims", [])
-            if isinstance(claim_register_data, dict)
-            else []
-        )
-
-        control_plane_module.build_claim_register(
-            claims
-        )
-
+        claim_register_data = json.loads(claim_register or "{}")
+        claims = claim_register_data.get("claims", []) if isinstance(claim_register_data, dict) else []
+        control_plane_module.build_claim_register(claims)
     except Exception as exc:
-
         return page(
             f"""
             <p class='critical'>
@@ -2549,12 +2519,6 @@ async def video_inspiration(
           type="hidden"
           name="input_type"
           value="topic"
-        >
-
-        <input
-          type="hidden"
-          name="topic"
-          value="{esc(suggested_title)}"
         >
 
         <label>
