@@ -1,1085 +1,351 @@
 """
-Ren Media V2 — Structured Strategy Library
+Ren Media — Canonical Strategy Registry
 
-Purpose:
-- Store Ren Media's available psychological, persuasion,
-  storytelling, attention, and structural strategies.
-- Give the Strategy Engine enough information to decide
-  WHEN a strategy belongs in a video.
-- Prevent the model from treating every technique as mandatory.
+This is the single source of truth for strategy IDs.
 
-Important:
-This file is a knowledge library, not the decision engine.
-The Strategy Engine decides what to use.
+Rules:
+- Every strategy has exactly one canonical ID.
+- Other modules must reference these IDs.
+- Do not create strategy IDs inside prompts.
+- Do not create strategy IDs inside validator.py.
+- Do not silently rename existing psychology.py concepts.
 """
+
+# =============================================================================
+# CANONICAL STRATEGIES
+# =============================================================================
 
 STRATEGIES = {
 
-    # ============================================================
-    # ATTENTION / CURIOSITY
-    # ============================================================
-
-    "zeigarnik_effect": {
-        "name": "Zeigarnik Effect / Macro Open Loop",
-        "category": "attention",
-
-        "primary_purpose":
-            "Maintain attention through a meaningful unresolved question.",
-
+    "emotional_triggers": {
+        "name": "Emotional Triggers",
+        "category": "emotion",
+        "primary_purpose": "Create an emotionally meaningful response that supports the video's main idea.",
         "use_when": [
-            "The video contains a question with a real later payoff.",
-            "The answer can be delayed without frustrating the viewer."
+            "The topic naturally involves emotion.",
+            "An emotional response helps the viewer understand or remember the point."
         ],
-
         "do_not_use_when": [
-            "The viewer needs an immediate answer.",
-            "There is no substantive later payoff.",
-            "The unresolved question exists only to manufacture retention."
+            "Emotion would exaggerate the evidence.",
+            "The topic requires neutral factual treatment."
         ],
-
-        "locations": [
+        "script_locations": [
             "hook",
-            "setup",
-            "midpoint",
-            "pre_climax"
+            "development",
+            "climax"
         ],
-
-        "desired_response":
-            "I want to know how this resolves.",
-
-        "application":
-            "Plant one concrete question and resolve it later with information that materially improves the viewer's understanding.",
-
-        "good_example":
-            "There's one reason this keeps happening, and it isn't the reason most people assume.",
-
-        "bad_example":
-            "Keep watching because there's a shocking secret coming.",
-
+        "desired_viewer_response": "Emotional recognition or significance.",
+        "how_to_apply": "Use concrete situations, consequences and emotionally recognizable experiences without manufacturing personal experiences.",
+        "good_example": "Describe a recognizable relationship situation and explain why it matters.",
+        "bad_example": "Artificially escalating emotion simply to create retention.",
         "risks": [
-            "fake suspense",
-            "delayed answers",
-            "retention manipulation"
+            "Emotional manipulation",
+            "Overstatement"
         ],
+        "evidence_requirements": "None for emotional framing itself. Factual claims still require appropriate support.",
+        "intensity_guidance": "LOW to MEDIUM by default.",
+        "repetition_guidance": "Vary emotional expression rather than repeating the same emotional pattern."
+    },
 
-        "evidence_requirements":
-            "Do not make a scientific claim about the Zeigarnik effect unless appropriate evidence is available.",
+    "scene_zoom_technique": {
+        "name": "Scene Zoom Technique",
+        "category": "visualization",
+        "primary_purpose": "Turn an abstract idea into a concrete, recognizable situation.",
+        "use_when": [
+            "The viewer benefits from seeing how an idea appears in real life.",
+            "The concept is abstract or difficult to visualize."
+        ],
+        "do_not_use_when": [
+            "A concrete scene would distort the evidence.",
+            "The point is already clear without visualization."
+        ],
+        "script_locations": [
+            "setup",
+            "development",
+            "example"
+        ],
+        "desired_viewer_response": "Recognition and mental visualization.",
+        "how_to_apply": "Zoom into a specific hypothetical or supplied situation without pretending it happened to the creator.",
+        "good_example": "Imagine a couple having the same conversation after a long day...",
+        "bad_example": "I remember sitting in my living room when this happened...",
+        "risks": [
+            "Fabricated personal experience",
+            "Over-dramatization"
+        ],
+        "evidence_requirements": "Clearly distinguish hypothetical examples from documented events.",
+        "intensity_guidance": "LOW to MEDIUM.",
+        "repetition_guidance": "Use selectively."
+    },
 
-        "intensity":
-            "low-medium",
-
-        "repetition":
-            "Prefer one major unresolved question. Smaller loops must have distinct purposes and payoffs.",
-
-        "keywords": [
-            "why",
-            "how",
-            "reason",
-            "secret",
-            "mistake",
-            "truth"
-        ]
+    "point_development": {
+        "name": "Point Development",
+        "category": "structure",
+        "primary_purpose": "Develop an important idea deeply enough for the viewer to understand it.",
+        "use_when": [
+            "A point requires explanation rather than a brief statement."
+        ],
+        "do_not_use_when": [
+            "The point is minor.",
+            "Additional explanation would create unnecessary length."
+        ],
+        "script_locations": [
+            "development"
+        ],
+        "desired_viewer_response": "Understanding.",
+        "how_to_apply": "Explain what the point is, why it matters, how it works, what it looks like and how it connects to the next idea.",
+        "good_example": "Explain a communication behavior, its consequence, a recognizable example and its connection to the next behavior.",
+        "bad_example": "Repeating the same claim using different words.",
+        "risks": [
+            "Over-explaining",
+            "Lecture-like pacing"
+        ],
+        "evidence_requirements": "Claims must follow the claim register and governance rules.",
+        "intensity_guidance": "MEDIUM.",
+        "repetition_guidance": "Each major point should be developed once."
     },
 
     "curiosity_gaps": {
-        "name": "Curiosity Gap / Micro Loop",
-        "category": "curiosity",
-
-        "primary_purpose":
-            "Create a specific information gap that a later section can satisfy.",
-
+        "name": "Curiosity Gaps",
+        "category": "retention",
+        "primary_purpose": "Create a meaningful unanswered question that encourages continued viewing.",
         "use_when": [
-            "A meaningful unanswered question exists.",
-            "The payoff is reasonably close.",
-            "The missing information matters to the viewer."
+            "The question naturally follows from the video's promise."
         ],
-
         "do_not_use_when": [
-            "The answer is trivial.",
-            "The payoff does not exist.",
-            "The video repeatedly promises information it never delivers."
+            "The payoff cannot realistically be delivered.",
+            "The device would feel manipulative."
         ],
-
-        "locations": [
+        "script_locations": [
             "hook",
             "transitions",
-            "rehooks"
+            "section openings"
         ],
-
-        "desired_response":
-            "I need the missing piece.",
-
-        "application":
-            "Give enough context for the viewer to understand why the missing information matters, then provide the payoff.",
-
-        "good_example":
-            "The problem starts earlier than the argument itself. Here's where.",
-
-        "bad_example":
-            "You won't believe what happens next.",
-
+        "desired_viewer_response": "Curiosity.",
+        "how_to_apply": "Raise a specific question or unresolved tension and provide its payoff later.",
+        "good_example": "The interesting part is what happens when that pattern repeats...",
+        "bad_example": "You won't believe what happens next.",
         "risks": [
-            "clickbait",
-            "loop fatigue",
-            "false promises"
+            "Unnecessary suspense",
+            "Unresolved promises"
         ],
-
-        "evidence_requirements":
-            "No special evidence is required unless the loop contains a factual claim.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Avoid announcing multiple unresolved loops within a short period.",
-
-        "keywords": [
-            "why",
-            "what",
-            "hidden",
-            "missing",
-            "reason"
-        ]
+        "evidence_requirements": "The eventual payoff must actually answer the question.",
+        "intensity_guidance": "LOW to MEDIUM.",
+        "repetition_guidance": "Avoid stacking too many unresolved questions."
     },
 
     "pattern_interrupts": {
-        "name": "Pattern Interrupt",
-        "category": "attention",
-
-        "primary_purpose":
-            "Refresh attention when presentation becomes predictable.",
-
+        "name": "Pattern Interrupts",
+        "category": "pacing",
+        "primary_purpose": "Prevent monotonous presentation by changing the rhythm or presentation approach.",
         "use_when": [
-            "A section has become rhythmically predictable.",
-            "A transition benefits from a change in presentation."
+            "The script becomes rhythmically predictable."
         ],
-
         "do_not_use_when": [
-            "The subject requires calm precision.",
-            "The interruption would damage an important emotional payoff.",
-            "The interruption exists only to create artificial excitement."
+            "The interruption would distract from an important explanation."
         ],
-
-        "locations": [
+        "script_locations": [
             "transitions",
-            "middle",
-            "rehooks"
+            "long development sections"
         ],
-
-        "desired_response":
-            "My attention has been refreshed.",
-
-        "application":
-            "Change rhythm, framing, example type, perspective, or question rather than inserting random shock.",
-
-        "good_example":
-            "After explaining the theory, switch to one ordinary Tuesday-night example.",
-
-        "bad_example":
-            "Suddenly announce something shocking that has nothing to do with the argument.",
-
+        "desired_viewer_response": "Renewed attention.",
+        "how_to_apply": "Change sentence rhythm, perspective, example type or presentation approach naturally.",
+        "good_example": "After explaining a concept, shift into a concrete scenario.",
+        "bad_example": "Insert a random dramatic sentence every few paragraphs.",
         "risks": [
-            "gimmickry",
-            "constant interruption",
-            "loss of coherence"
+            "Mechanical pacing",
+            "Distraction"
         ],
-
-        "evidence_requirements":
-            "No special evidence unless the pattern interrupt itself contains a factual claim.",
-
-        "intensity":
-            "low-medium",
-
-        "repetition":
-            "Vary the form. Do not repeat the same interruption pattern.",
-
-        "keywords": [
-            "attention",
-            "boring",
-            "predictable",
-            "retention"
-        ]
+        "evidence_requirements": "None for the structural technique itself.",
+        "intensity_guidance": "LOW.",
+        "repetition_guidance": "Use sparingly."
     },
 
-    # ============================================================
-    # EMOTION / RECOGNITION
-    # ============================================================
-
-    "emotional_triggers": {
-        "name": "Emotion / Stakes",
-        "category": "emotion",
-
-        "primary_purpose":
-            "Make information matter by connecting it to a genuine human consequence.",
-
+    "contrast": {
+        "name": "Contrast",
+        "category": "reasoning",
+        "primary_purpose": "Make an important distinction easier to understand.",
         "use_when": [
-            "The subject has a genuine human consequence.",
-            "Emotion improves relevance or understanding."
+            "Two ideas, behaviors or outcomes are meaningfully different."
         ],
-
         "do_not_use_when": [
-            "Fear or outrage would distort the topic.",
-            "The subject requires calm precision.",
-            "Emotional escalation is being used merely for retention."
+            "The distinction is artificial."
         ],
-
-        "locations": [
-            "hook",
-            "problem",
-            "stakes",
-            "payoff"
-        ],
-
-        "desired_response":
-            "This matters to me.",
-
-        "application":
-            "Use concrete consequences and calibrated emotion rather than escalating language for its own sake.",
-
-        "good_example":
-            "The frustrating part is that the harder you try to fix the wrong problem, the more exhausted you become.",
-
-        "bad_example":
-            "This destroys your entire life if you don't act NOW.",
-
-        "risks": [
-            "fearmongering",
-            "emotional escalation",
-            "manipulation"
-        ],
-
-        "evidence_requirements":
-            "Emotional framing must not convert uncertain information into certainty.",
-
-        "intensity":
-            "medium",
-
-        "repetition":
-            "Vary emotional intensity. Allow neutral explanatory sections between stronger moments.",
-
-        "keywords": [
-            "fear",
-            "frustration",
-            "love",
-            "money",
-            "loss",
-            "risk",
-            "pain"
-        ]
-    },
-
-    "self_verification_theory": {
-        "name": "Self-Verification / Recognition",
-        "category": "trust",
-
-        "primary_purpose":
-            "Help the viewer feel accurately understood before challenging their interpretation.",
-
-        "use_when": [
-            "The audience is likely to feel misunderstood.",
-            "The video challenges a common explanation for the viewer's experience."
-        ],
-
-        "do_not_use_when": [
-            "Validation would reinforce a harmful or unsupported belief.",
-            "The writer would need to pretend to know the viewer's exact personal experience."
-        ],
-
-        "locations": [
+        "script_locations": [
             "setup",
-            "problem"
+            "development",
+            "resolution"
         ],
-
-        "desired_response":
-            "This understands what I'm experiencing.",
-
-        "application":
-            "Describe a recognizable experience without claiming that every viewer has the same experience.",
-
-        "good_example":
-            "You can do everything that looks right on paper and still feel the relationship drifting.",
-
-        "bad_example":
-            "You're right about everything and everyone else is the problem.",
-
+        "desired_viewer_response": "Clarity.",
+        "how_to_apply": "Place genuinely different approaches or outcomes side by side.",
+        "good_example": "There is a difference between being quiet and avoiding a conversation.",
+        "bad_example": "Inventing a false either/or distinction.",
         "risks": [
-            "over-validation",
-            "reinforcing false beliefs",
-            "pretending to know the viewer"
+            "False dichotomy"
         ],
-
-        "evidence_requirements":
-            "Do not turn a relatable experience into a universal psychological claim.",
-
-        "intensity":
-            "medium",
-
-        "repetition":
-            "Primarily use early. Do not repeatedly tell the viewer that they are understood.",
-
-        "keywords": [
-            "feel",
-            "experience",
-            "struggle",
-            "alone",
-            "understood"
-        ]
+        "evidence_requirements": "Both sides must be represented accurately.",
+        "intensity_guidance": "LOW to MEDIUM.",
+        "repetition_guidance": "Use for major distinctions only."
     },
 
-    # ============================================================
-    # PERSUASION — CIALDINI
-    # ============================================================
-
-    "reciprocity": {
-        "name": "Reciprocity",
-        "category": "persuasion",
-
-        "primary_purpose":
-            "Deliver genuine value before asking the viewer for attention or action.",
-
+    "causal_progression": {
+        "name": "Causal Progression",
+        "category": "reasoning",
+        "primary_purpose": "Show how one idea, behavior or condition can lead toward another.",
         "use_when": [
-            "The video can provide useful value before a CTA.",
-            "A practical insight can be delivered early."
+            "The source material supports a meaningful relationship between events or behaviors."
         ],
-
         "do_not_use_when": [
-            "Value is intentionally withheld to manufacture obligation.",
-            "The viewer is pressured into feeling indebted."
+            "The evidence only demonstrates correlation or association.",
+            "The causal chain is speculative."
         ],
-
-        "locations": [
-            "early value",
-            "solution",
-            "before CTA"
+        "script_locations": [
+            "development",
+            "resolution"
         ],
-
-        "desired_response":
-            "This video has already helped me.",
-
-        "application":
-            "Give the viewer something genuinely useful before asking for an action.",
-
-        "good_example":
-            "Give the viewer one practical adjustment they can use today before asking them to subscribe.",
-
-        "bad_example":
-            "I gave you this tip, so you owe me a subscription.",
-
+        "desired_viewer_response": "Understanding of relationships between ideas.",
+        "how_to_apply": "Use appropriately calibrated language unless causation is actually established.",
+        "good_example": "This pattern can contribute to...",
+        "bad_example": "This behavior causes divorce, when the evidence only shows association.",
         "risks": [
-            "transactional framing",
-            "manipulation",
-            "manufactured obligation"
+            "Causal overclaiming"
         ],
-
-        "evidence_requirements":
-            "Factual claims inside the value must still be supported.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Use as a structural principle rather than repeating the same persuasion tactic.",
-
-        "keywords": [
-            "value",
-            "help",
-            "tip",
-            "useful"
-        ]
+        "evidence_requirements": "Causal language requires appropriate evidence.",
+        "intensity_guidance": "MEDIUM.",
+        "repetition_guidance": "Use only where necessary."
     },
-
-    "commitment_consistency": {
-        "name": "Commitment and Consistency",
-        "category": "persuasion",
-
-        "primary_purpose":
-            "Support follow-through through a small, genuine commitment.",
-
-        "use_when": [
-            "The viewer can make a harmless self-directed commitment.",
-            "The commitment directly relates to the video's useful takeaway."
-        ],
-
-        "do_not_use_when": [
-            "The commitment is intended to trap the viewer into another conclusion.",
-            "The request is unrelated to the video's value."
-        ],
-
-        "locations": [
-            "solution",
-            "action step"
-        ],
-
-        "desired_response":
-            "I'll actually try this.",
-
-        "application":
-            "Invite one small behavior that directly follows from the video's useful takeaway.",
-
-        "good_example":
-            "Tonight, notice one moment when you interrupt yourself before responding. That's the whole exercise.",
-
-        "bad_example":
-            "Say yes now, because then you'll have to agree with everything else.",
-
-        "risks": [
-            "coercive commitment",
-            "engagement manipulation"
-        ],
-
-        "evidence_requirements":
-            "Do not claim guaranteed behavioral effects without evidence.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Prefer one meaningful commitment instead of many micro-asks.",
-
-        "keywords": [
-            "commit",
-            "try",
-            "practice",
-            "action"
-        ]
-    },
-
-    "liking": {
-        "name": "Liking",
-        "category": "trust",
-
-        "primary_purpose":
-            "Build genuine rapport through relatability rather than manufactured authority.",
-
-        "use_when": [
-            "A genuine relatable observation improves trust.",
-            "The creator has supplied a real personal experience."
-        ],
-
-        "do_not_use_when": [
-            "The writer would need to invent a personal experience.",
-            "False similarity or intimacy would be required."
-        ],
-
-        "locations": [
-            "setup",
-            "transition"
-        ],
-
-        "desired_response":
-            "This feels human and relatable.",
-
-        "application":
-            "Use supplied experiences or broadly relatable observations without fabricating biography.",
-
-        "good_example":
-            "Imagine making the same mistake yourself. The scene can be hypothetical without pretending the narrator lived it.",
-
-        "bad_example":
-            "I made this mistake for ten years.",
-            
-        "risks": [
-            "fabricated persona",
-            "false intimacy"
-        ],
-
-        "evidence_requirements":
-            "Personal history must come from supplied source material.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "One or two authentic rapport moments are generally enough.",
-
-        "keywords": [
-            "relatable",
-            "mistake",
-            "human",
-            "admit"
-        ]
-    },
-
-    "authority": {
-        "name": "Authority",
-        "category": "trust",
-
-        "primary_purpose":
-            "Use genuine expertise or credible evidence to improve trust.",
-
-        "use_when": [
-            "The creator supplied relevant credentials.",
-            "A real source is available."
-        ],
-
-        "do_not_use_when": [
-            "Credentials would need to be invented.",
-            "Researchers or institutions would need to be invented.",
-            "A citation cannot be verified."
-        ],
-
-        "locations": [
-            "claim setup",
-            "evidence"
-        ],
-
-        "desired_response":
-            "There is a credible reason to trust this claim.",
-
-        "application":
-            "Use verifiable sources or supplied credentials. Otherwise omit authority framing.",
-
-        "good_example":
-            "According to the source cited for this video, ...",
-
-        "bad_example":
-            "Harvard researchers proved this."
-
-        ,
-
-        "risks": [
-            "fabricated citation",
-            "false authority",
-            "credential fabrication"
-        ],
-
-        "evidence_requirements":
-            "HIGH — specific authority claims require verifiable source material.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Use only where evidence materially improves understanding.",
-
-        "keywords": [
-            "research",
-            "study",
-            "expert",
-            "doctor",
-            "professor"
-        ]
-    },
-
-    "social_proof": {
-        "name": "Social Proof",
-        "category": "persuasion",
-
-        "primary_purpose":
-            "Show how other people behave or respond when that information is genuinely relevant.",
-
-        "use_when": [
-            "Real audience behavior or supplied evidence exists.",
-            "The behavior of others genuinely helps explain the topic."
-        ],
-
-        "do_not_use_when": [
-            "Statistics or testimonials would need to be invented.",
-            "Popularity is being presented as proof of truth."
-        ],
-
-        "locations": [
-            "evidence",
-            "examples"
-        ],
-
-        "desired_response":
-            "This behavior is recognizable in the relevant context.",
-
-        "application":
-            "Use verified examples or carefully calibrated language. Never invent numbers.",
-
-        "good_example":
-            "The examples reviewed for this video show this pattern repeatedly.",
-
-        "bad_example":
-            "87% of people do this."
-
-        ,
-
-        "risks": [
-            "fake statistics",
-            "false consensus",
-            "popularity-as-proof"
-        ],
-
-        "evidence_requirements":
-            "HIGH for numerical or survey claims.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Use sparingly.",
-
-        "keywords": [
-            "most people",
-            "everyone",
-            "common",
-            "percentage",
-            "survey"
-        ]
-    },
-
-    "scarcity": {
-        "name": "Scarcity",
-        "category": "persuasion",
-
-        "primary_purpose":
-            "Highlight genuine rarity or limited availability when it materially matters.",
-
-        "use_when": [
-            "Something is genuinely scarce or uncommon."
-        ],
-
-        "do_not_use_when": [
-            "Urgency would be manufactured.",
-            "Rarity is being exaggerated.",
-            "Fear of missing out is being manufactured."
-        ],
-
-        "locations": [
-            "title",
-            "hook",
-            "offer context"
-        ],
-
-        "desired_response":
-            "This is unusually limited or uncommon.",
-
-        "application":
-            "Describe genuine scarcity precisely. Never fake exclusivity.",
-
-        "good_example":
-            "Only use a limited-time claim when the limitation is real.",
-
-        "bad_example":
-            "This secret disappears tonight.",
-
-        "risks": [
-            "false urgency",
-            "fear of missing out",
-            "manipulation"
-        ],
-
-        "evidence_requirements":
-            "Scarcity claims require a factual basis.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Rarely needed for informational content.",
-
-        "keywords": [
-            "rare",
-            "limited",
-            "exclusive",
-            "last chance"
-        ]
-    },
-
-    # ============================================================
-    # NUDGE / CHOICE ARCHITECTURE
-    # ============================================================
 
     "choice_architecture": {
-        "name": "Choice Architecture / Nudge",
-        "category": "persuasion",
-
-        "primary_purpose":
-            "Present options and consequences so the viewer can make a better-informed choice.",
-
+        "name": "Choice Architecture",
+        "category": "decision",
+        "primary_purpose": "Help the viewer understand how available choices influence behavior.",
         "use_when": [
-            "The video gives practical choices.",
-            "Comparing options improves decision quality."
+            "The topic genuinely involves decisions or behavioral options."
         ],
-
         "do_not_use_when": [
-            "The goal is to covertly force a conclusion.",
-            "Important alternatives are intentionally hidden.",
-            "The video pretends a value judgment is an objective fact."
+            "The concept does not meaningfully involve choice."
         ],
-
-        "locations": [
-            "recommendations",
-            "solution",
-            "decision points"
+        "script_locations": [
+            "development",
+            "practical takeaway"
         ],
-
-        "desired_response":
-            "I can see the trade-off clearly.",
-
-        "application":
-            "Present meaningful options, defaults, and consequences without disguising persuasion as neutral fact.",
-
-        "good_example":
-            "You can respond immediately, or wait until you actually have something useful to say. The trade-off is speed versus substance.",
-
-        "bad_example":
-            "There's only one sensible choice, so don't bother considering the others.",
-
+        "desired_viewer_response": "Awareness of choices.",
+        "how_to_apply": "Explain how options are presented and how that presentation can influence decisions.",
+        "good_example": "Show how changing the available options changes the decision environment.",
+        "bad_example": "Mention choice architecture merely because it is a psychology term.",
         "risks": [
-            "covert manipulation",
-            "false binary",
-            "hidden alternatives"
+            "Psychology perfume"
         ],
-
-        "evidence_requirements":
-            "Consequences should be supported when presented as factual.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Use where a genuine decision exists.",
-
-        "keywords": [
-            "choice",
-            "option",
-            "decision",
-            "default",
-            "trade-off"
-        ]
+        "evidence_requirements": "Psychological claims require appropriate support.",
+        "intensity_guidance": "LOW to MEDIUM.",
+        "repetition_guidance": "Use only where relevant."
     },
-
-    # ============================================================
-    # STORYTELLING
-    # ============================================================
-
-    "but_and_therefore": {
-        "name": "But / Therefore Causal Story Progression",
-        "category": "storytelling",
-
-        "primary_purpose":
-            "Keep events connected through obstacles and consequences rather than disconnected events.",
-
-        "use_when": [
-            "The video uses a narrative example.",
-            "A sequence of events needs causal momentum."
-        ],
-
-        "do_not_use_when": [
-            "The content is a straightforward factual explanation with no narrative sequence."
-        ],
-
-        "locations": [
-            "stories",
-            "examples",
-            "case studies"
-        ],
-
-        "desired_response":
-            "Each event changes what happens next.",
-
-        "application":
-            "Connect events using consequence, contrast, or causation instead of simply listing what happened.",
-
-        "good_example":
-            "He tried to fix the problem. But the fix created a new problem. Therefore, he changed the way he approached it.",
-
-        "bad_example":
-            "Then this happened. Then this happened. Then this happened.",
-
-        "risks": [
-            "forced causality",
-            "artificial storytelling"
-        ],
-
-        "evidence_requirements":
-            "Do not imply causation where the evidence only establishes sequence or association.",
-
-        "intensity":
-            "medium",
-
-        "repetition":
-            "Use naturally as story logic, not as a visible formula.",
-
-        "keywords": [
-            "but",
-            "therefore",
-            "because",
-            "however",
-            "consequence"
-        ]
-    },
-
-    "scene_visualization": {
-        "name": "Concrete Scene Visualization",
-        "category": "storytelling",
-
-        "primary_purpose":
-            "Turn an abstract idea into a concrete, understandable situation.",
-
-        "use_when": [
-            "The concept is abstract.",
-            "A hypothetical scene would make the idea easier to understand."
-        ],
-
-        "do_not_use_when": [
-            "A scene would require fabricated personal experience.",
-            "The scene adds drama without improving understanding."
-        ],
-
-        "locations": [
-            "examples",
-            "explanations",
-            "transitions"
-        ],
-
-        "desired_response":
-            "I can picture what this means.",
-
-        "application":
-            "Use location, action, thought, emotion, and dialogue for hypothetical or supplied scenes. Make hypothetical framing clear when needed.",
-
-        "good_example":
-            "Imagine standing in the kitchen after work. You see the mug beside the dishwasher, and suddenly the mug isn't the thing you're angry about anymore.",
-
-        "bad_example":
-            "I remember standing in my kitchen and feeling this exact thing when no such experience was supplied.",
-
-        "risks": [
-            "fabricated experience",
-            "overdramatic detail"
-        ],
-
-        "evidence_requirements":
-            "Personal details require user-supplied source material.",
-
-        "intensity":
-            "medium",
-
-        "repetition":
-            "Use concrete scenes strategically. Do not turn every point into a movie scene.",
-
-        "keywords": [
-            "imagine",
-            "scene",
-            "moment",
-            "example",
-            "conversation"
-        ]
-    },
-
-    # ============================================================
-    # STRUCTURE
-    # ============================================================
-
-    "point_development": {
-        "name": "Full Point Development",
-        "category": "structure",
-
-        "primary_purpose":
-            "Fully develop each major point before moving to the next.",
-
-        "use_when": [
-            "A point materially advances the argument."
-        ],
-
-        "do_not_use_when": [
-            "The content is only a transition.",
-            "The detail is minor and does not require development."
-        ],
-
-        "locations": [
-            "body sections"
-        ],
-
-        "desired_response":
-            "I understand the point and why it matters.",
-
-        "application":
-            "Develop the point through context, application, concrete example, and connection to the larger argument.",
-
-        "good_example":
-            "Explain what the idea is, show it in a concrete situation, explain why it matters, then connect it to what comes next.",
-
-        "bad_example":
-            "List five points with one sentence each.",
-
-        "risks": [
-            "overdevelopment",
-            "repetition",
-            "slow pacing"
-        ],
-
-        "evidence_requirements":
-            "Claims still require appropriate support.",
-
-        "intensity":
-            "high",
-
-        "repetition":
-            "Applies structurally to substantive points.",
-
-        "keywords": [
-            "point",
-            "explain",
-            "example",
-            "why",
-            "how"
-        ]
-    },
-
-    "point_ordering": {
-        "name": "Point Ordering / Escalation",
-        "category": "structure",
-
-        "primary_purpose":
-            "Order examples and ideas so the argument builds instead of peaking too early.",
-
-        "use_when": [
-            "Several comparable examples or points need ordering."
-        ],
-
-        "do_not_use_when": [
-            "The strongest point must come first for clarity or safety."
-        ],
-
-        "locations": [
-            "body sections"
-        ],
-
-        "desired_response":
-            "Each example makes the argument clearer or stronger.",
-
-        "application":
-            "Order material according to the argument's needs, often building toward the most revealing point before synthesis.",
-
-        "good_example":
-            "Use a strong example, then the most revealing example, then a concise synthesis.",
-
-        "bad_example":
-            "Use the strongest example first and spend the remainder repeating it.",
-
-        "risks": [
-            "artificial escalation"
-        ],
-
-        "evidence_requirements":
-            "No special evidence requirement.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Structural rather than verbal.",
-
-        "keywords": [
-            "strongest",
-            "escalate",
-            "sequence",
-            "examples"
-        ]
-    },
-
-    # ============================================================
-    # CTA
-    # ============================================================
 
     "small_audience_ask": {
         "name": "Small Audience Ask",
-        "category": "cta",
-
-        "primary_purpose":
-            "Create a low-friction participation moment at a natural pause.",
-
+        "category": "CTA",
+        "primary_purpose": "Invite a simple, relevant viewer action.",
         "use_when": [
-            "A genuine reflection opportunity exists.",
-            "The ask does not interrupt unresolved narrative tension."
+            "A natural audience interaction fits the video."
         ],
-
         "do_not_use_when": [
-            "The viewer is inside an unresolved narrative moment.",
-            "The ask is unrelated.",
-            "The purpose is purely engagement bait."
+            "It interrupts unresolved narrative tension."
         ],
-
-        "locations": [
-            "midpoint",
-            "late-middle"
+        "script_locations": [
+            "outro"
         ],
-
-        "desired_response":
-            "I can participate without leaving the story.",
-
-        "application":
-            "Ask for a simple reflection only at a natural pause.",
-
-        "good_example":
-            "If you've caught yourself doing this, a simple 'yes' is enough.",
-
-        "bad_example":
-            "STOP THE VIDEO AND COMMENT RIGHT NOW BEFORE WE CONTINUE.",
-
+        "desired_viewer_response": "Simple participation.",
+        "how_to_apply": "Ask for one relevant action rather than multiple competing actions.",
+        "good_example": "If you've noticed this pattern, tell me which part sounds familiar.",
+        "bad_example": "Like, subscribe, comment, share, join, download and buy.",
         "risks": [
-            "immersion break",
-            "engagement bait"
+            "CTA overload",
+            "Narrative interruption"
         ],
-
-        "evidence_requirements":
-            "No special evidence requirement.",
-
-        "intensity":
-            "low",
-
-        "repetition":
-            "Normally one mid-video participation ask maximum.",
-
-        "keywords": [
-            "comment",
-            "subscribe",
-            "engage"
-        ]
-    }
+        "evidence_requirements": "None.",
+        "intensity_guidance": "LOW.",
+        "repetition_guidance": "Normally once."
+    },
 }
 
 
-def get_strategy(strategy_key):
-    """Return one strategy record by key."""
-    return STRATEGIES.get(strategy_key)
+# =============================================================================
+# REGISTRY HELPERS
+# =============================================================================
+
+def get_strategy(strategy_id):
+    """Return one canonical strategy record."""
+    return STRATEGIES.get(strategy_id)
 
 
-def strategy_catalog_text(selected_keys=None):
+def get_all_strategy_ids():
+    """Return every canonical strategy ID."""
+    return list(STRATEGIES.keys())
+
+
+def get_all_strategies():
+    """Return the complete canonical registry."""
+    return STRATEGIES.copy()
+
+
+def strategy_exists(strategy_id):
+    """Check whether an ID belongs to the canonical registry."""
+    return strategy_id in STRATEGIES
+
+
+def validate_strategy_ids(strategy_ids):
     """
-    Return a compact representation for prompts.
+    Return unknown strategy IDs.
 
-    If selected_keys is supplied, ONLY those strategies are returned.
-    This is important: generation should not receive the entire strategy
-    library unless there is a deliberate reason to do so.
+    This is deliberately strict.
+    Unknown IDs are not silently converted or renamed.
+    """
+    return [
+        strategy_id
+        for strategy_id in strategy_ids
+        if strategy_id not in STRATEGIES
+    ]
+
+
+# =============================================================================
+# STARTUP INTEGRITY CHECK
+# =============================================================================
+
+_REQUIRED_FIELDS = {
+    "name",
+    "category",
+    "primary_purpose",
+    "use_when",
+    "do_not_use_when",
+    "script_locations",
+    "desired_viewer_response",
+    "how_to_apply",
+    "good_example",
+    "bad_example",
+    "risks",
+    "evidence_requirements",
+    "intensity_guidance",
+    "repetition_guidance",
+}
+
+
+def validate_registry():
+    """
+    Verify that every canonical strategy contains the required fields.
+
+    Raises ValueError if the registry is malformed.
     """
 
-    if selected_keys is None:
-        selected = STRATEGIES.items()
-    else:
-        selected = (
-            (key, STRATEGIES[key])
-            for key in selected_keys
-            if key in STRATEGIES
-        )
+    for strategy_id, strategy in STRATEGIES.items():
 
-    blocks = []
+        missing = _REQUIRED_FIELDS - set(strategy.keys())
 
-    for key, strategy in selected:
-        blocks.append(
-            f"""
-STRATEGY: {key}
-NAME: {strategy["name"]}
-CATEGORY: {strategy["category"]}
-PURPOSE: {strategy["primary_purpose"]}
-USE WHEN: {"; ".join(strategy["use_when"])}
-DO NOT USE WHEN: {"; ".join(strategy["do_not_use_when"])}
-LOCATIONS: {", ".join(strategy["locations"])}
-DESIRED RESPONSE: {strategy["desired_response"]}
-APPLICATION: {strategy["application"]}
-GOOD EXAMPLE: {strategy["good_example"]}
-BAD EXAMPLE: {strategy["bad_example"]}
-RISKS: {"; ".join(strategy["risks"])}
-EVIDENCE: {strategy["evidence_requirements"]}
-INTENSITY: {strategy["intensity"]}
-REPETITION: {strategy["repetition"]}
-""".strip()
-        )
+        if missing:
+            raise ValueError(
+                f"Strategy '{strategy_id}' is missing fields: "
+                f"{sorted(missing)}"
+            )
 
-    return "\n\n".join(blocks)
+    return True
+
+
+validate_registry()
