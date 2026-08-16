@@ -72,15 +72,12 @@ VOICES = [
 
 # =============================================================================
 # V2 COMPATIBILITY LAYER
-#
-# Purpose:
-# The new modules are independent knowledge/logic modules.
-# This layer prevents main.py from assuming one particular function name.
 # =============================================================================
 
 def _module_callable(module, preferred_names):
     for name in preferred_names:
         fn = getattr(module, name, None)
+
         if callable(fn):
             return fn
 
@@ -91,9 +88,10 @@ def _call_flexible(fn, values):
     """
     Call a function using only arguments its signature accepts.
 
-    This lets the integration work with slightly different but compatible
-    function signatures without changing the underlying V2 modules.
+    This preserves compatibility with the existing V2 modules without
+    requiring their function signatures to match main.py exactly.
     """
+
     if fn is None:
         return None
 
@@ -105,6 +103,7 @@ def _call_flexible(fn, values):
     kwargs = {}
 
     for name, parameter in sig.parameters.items():
+
         if parameter.kind in (
             inspect.Parameter.VAR_POSITIONAL,
             inspect.Parameter.VAR_KEYWORD,
@@ -116,11 +115,13 @@ def _call_flexible(fn, values):
 
     try:
         return fn(**kwargs)
+
     except TypeError:
-        # Some implementations may use positional parameters.
+
         positional = []
 
         for name, parameter in sig.parameters.items():
+
             if parameter.kind in (
                 inspect.Parameter.VAR_POSITIONAL,
                 inspect.Parameter.VAR_KEYWORD,
@@ -135,7 +136,11 @@ def _call_flexible(fn, values):
 
 def _json_safe(value):
     try:
-        return json.dumps(value, indent=2, ensure_ascii=False)
+        return json.dumps(
+            value,
+            indent=2,
+            ensure_ascii=False,
+        )
     except Exception:
         return str(value)
 
@@ -144,7 +149,15 @@ def _json_safe(value):
 # STRATEGY ENGINE ADAPTER
 # =============================================================================
 
-def select_strategy_map(topic, audience="", objective="", length_minutes=10):
+def select_strategy_map(
+    topic,
+    audience="",
+    objective="",
+    length_minutes=10,
+    source_context="",
+    creative_direction="",
+):
+
     fn = _module_callable(
         strategy_engine_module,
         [
@@ -158,8 +171,8 @@ def select_strategy_map(topic, audience="", objective="", length_minutes=10):
 
     if fn is None:
         raise RuntimeError(
-            "strategy_engine.py does not expose a recognized strategy-selection "
-            "function."
+            "strategy_engine.py does not expose a recognized "
+            "strategy-selection function."
         )
 
     values = {
@@ -171,12 +184,22 @@ def select_strategy_map(topic, audience="", objective="", length_minutes=10):
         "length_minutes": length_minutes,
         "duration_minutes": length_minutes,
         "video_length": length_minutes,
+
+        "source_context": source_context,
+        "source_material": source_context,
+        "research": source_context,
+        "creative_direction": creative_direction,
     }
 
-    result = _call_flexible(fn, values)
+    result = _call_flexible(
+        fn,
+        values,
+    )
 
     if result is None:
-        raise RuntimeError("The strategy engine returned no strategy map.")
+        raise RuntimeError(
+            "The strategy engine returned no strategy map."
+        )
 
     return result
 
@@ -186,11 +209,6 @@ def select_strategy_map(topic, audience="", objective="", length_minutes=10):
 # =============================================================================
 
 def get_governance_text(strategy_map=None):
-    """
-    Governance is authoritative rules.
-
-    We intentionally do not duplicate those rules inside main.py.
-    """
 
     candidates = [
         "get_governance",
@@ -202,10 +220,17 @@ def get_governance_text(strategy_map=None):
     ]
 
     for name in candidates:
-        obj = getattr(governance_module, name, None)
+
+        obj = getattr(
+            governance_module,
+            name,
+            None,
+        )
 
         if callable(obj):
+
             try:
+
                 result = _call_flexible(
                     obj,
                     {
@@ -213,15 +238,17 @@ def get_governance_text(strategy_map=None):
                         "strategies": strategy_map,
                     },
                 )
+
                 if result is not None:
                     return _json_safe(result)
+
             except Exception:
                 continue
 
         elif obj is not None:
+
             return _json_safe(obj)
 
-    # We do not invent governance rules if the module exposes a different API.
     return (
         "Governance rules are defined in governance.py. "
         "Apply all applicable rules from that module."
@@ -239,6 +266,7 @@ def validate_generated_script(
     strategy_map,
     length_minutes,
 ):
+
     fn = _module_callable(
         validator_module,
         [
@@ -252,10 +280,13 @@ def validate_generated_script(
 
     if fn is None:
         raise RuntimeError(
-            "validator.py does not expose a recognized validation function."
+            "validator.py does not expose a recognized "
+            "validation function."
         )
 
-    governance_text = get_governance_text(strategy_map)
+    governance_text = get_governance_text(
+        strategy_map
+    )
 
     values = {
         "script": script_text,
@@ -271,19 +302,25 @@ def validate_generated_script(
         "target_minutes": length_minutes,
     }
 
-    result = _call_flexible(fn, values)
+    result = _call_flexible(
+        fn,
+        values,
+    )
 
     if result is None:
-        raise RuntimeError("The validator returned no result.")
+        raise RuntimeError(
+            "The validator returned no result."
+        )
 
     return result
 
 
 # =============================================================================
-# GENERIC TEXT CONVERSION FOR V2 OUTPUT
+# GENERIC TEXT CONVERSION
 # =============================================================================
 
 def result_to_text(result):
+
     if isinstance(result, str):
         return result
 
@@ -297,12 +334,9 @@ def result_to_text(result):
 
 
 def validation_status(validation):
-    """
-    Tries to understand common validator result formats without altering
-    validator.py itself.
-    """
 
     if isinstance(validation, dict):
+
         status = str(
             validation.get("status")
             or validation.get("overall_status")
@@ -310,7 +344,12 @@ def validation_status(validation):
             or ""
         ).upper()
 
-        if status in {"CRITICAL", "FAIL", "FAILED", "BLOCK"}:
+        if status in {
+            "CRITICAL",
+            "FAIL",
+            "FAILED",
+            "BLOCK",
+        }:
             return "CRITICAL"
 
         criticals = (
@@ -320,7 +359,7 @@ def validation_status(validation):
             or validation.get("errors")
         )
 
-        if isinstance(criticals, list) and len(criticals) > 0:
+        if isinstance(criticals, list) and criticals:
             return "CRITICAL"
 
         if validation.get("passed") is False:
@@ -389,6 +428,12 @@ Create a precise, editable beat plan for:
 TITLE / TOPIC:
 {topic}
 
+CREATOR DIRECTION:
+{creative_direction}
+
+SOURCE / RESEARCH MATERIAL:
+{source_context}
+
 TARGET LENGTH:
 {length_minutes} minutes
 Approximately {word_target} spoken words.
@@ -413,6 +458,14 @@ The strategy map is authoritative.
 Do NOT introduce unrelated psychological techniques simply because you know them.
 
 Each strategy must have a specific job.
+
+If source/research material was supplied:
+
+- Use it as source material rather than inventing additional facts.
+- Do not claim the source says something it does not say.
+- Distinguish evidence from interpretation.
+- Do not invent studies, statistics, researchers or quotations.
+- Do not manufacture authority.
 
 For every beat include:
 
@@ -450,6 +503,12 @@ Write the complete spoken narration using ONLY the APPROVED OUTLINE below.
 TOPIC:
 {topic}
 
+CREATOR DIRECTION:
+{creative_direction}
+
+SOURCE / RESEARCH MATERIAL:
+{source_context}
+
 TARGET:
 {length_minutes} minutes
 Approximately {word_target} words.
@@ -475,10 +534,23 @@ PACING REFERENCE:
 CORE RULE:
 
 Execute the approved plan.
+
 Do not redesign the video.
 
 Do not add major sections that aren't in the outline.
+
 Do not remove major beats unless necessary to stay within the target length.
+
+SOURCE / RESEARCH:
+
+If source material was supplied:
+
+- Use it faithfully.
+- Do not invent information and attribute it to the source.
+- Do not invent studies, researchers, statistics or quotations.
+- Do not turn an association into causation.
+- Do not present interpretation as established fact.
+- If the supplied material does not establish a claim, calibrate the language.
 
 PERSONAL EXPERIENCE:
 
@@ -561,19 +633,26 @@ No production instructions.
 
 
 # =============================================================================
-# TITLE ANALYSIS PROMPT
+# TITLE / CONTENT ANALYSIS PROMPT
 # =============================================================================
 
 ANALYZE_PROMPT_TEMPLATE = """
-You are the analysis layer of a YouTube content system.
+You are the analysis layer of a professional YouTube content system.
 
-The creator supplied:
+The creator may have supplied a title/topic, research material,
+or a source URL.
 
-TOPIC:
+INPUT TYPE:
+{input_type}
+
+CREATOR'S TITLE / TOPIC:
 {topic}
 
-CURRENT TITLE / TOPIC:
-{topic}
+CREATOR'S RESEARCH / SOURCE MATERIAL:
+{source_context}
+
+CREATOR'S DIRECTION:
+{creative_direction}
 
 LIVE YOUTUBE CONTEXT:
 {context_block}
@@ -583,8 +662,29 @@ TITLE TOOLKIT:
 
 {frame_stacking_note}
 
-Analyse whether the current title/topic gives the video a strong,
-clear and compelling promise.
+Your job is to determine what can legitimately be built from the
+material supplied by the creator.
+
+IMPORTANT:
+
+The supplied research/source material is evidence/context.
+
+Do not invent facts that are supposedly contained in the source.
+
+Clearly distinguish:
+
+- what the source actually supports
+- reasonable interpretation
+- creative framing
+- claims that would require additional evidence
+
+If the creator supplied only a topic, analyse the topic normally.
+
+If the creator supplied research, use it as the foundation rather
+than pretending the topic exists independently of the research.
+
+If the creator supplied a URL but the contents have not been retrieved,
+do not pretend that you have read the article.
 
 Do NOT use fake numerical "viral scores".
 
@@ -618,6 +718,12 @@ What the viewer expects to receive.
 
 CURIOSITY ANGLE:
 What unanswered question makes the viewer want to continue.
+
+SOURCE ROLE:
+How the supplied material should influence the video.
+
+EVIDENCE LIMITS:
+What claims should not be made without additional evidence.
 """
 
 
@@ -665,8 +771,11 @@ WHY:
 # =============================================================================
 
 def call_gemini(prompt: str) -> str:
+
     if not GEMINI_API_KEY:
-        raise RuntimeError("Missing GEMINI_API_KEY.")
+        raise RuntimeError(
+            "Missing GEMINI_API_KEY."
+        )
 
     headers = {
         "Content-Type": "application/json",
@@ -697,8 +806,20 @@ def call_gemini(prompt: str) -> str:
     data = response.json()
 
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except (KeyError, IndexError, TypeError):
+
+        return (
+            data["candidates"][0]
+            ["content"]["parts"][0]
+            ["text"]
+            .strip()
+        )
+
+    except (
+        KeyError,
+        IndexError,
+        TypeError,
+    ):
+
         raise RuntimeError(
             "Gemini returned an unexpected response."
         )
@@ -709,17 +830,27 @@ def call_gemini(prompt: str) -> str:
 # =============================================================================
 
 def esc(text: str) -> str:
-    return html.escape(str(text or ""))
+    return html.escape(
+        str(text or "")
+    )
 
 
 def page(body_html: str) -> str:
+
     return f"""
     <html>
+
     <head>
+
       <title>Ren Media V2</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
+
+      <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+      >
 
       <style>
+
         body {{
           font-family: sans-serif;
           max-width: 760px;
@@ -745,6 +876,11 @@ def page(body_html: str) -> str:
           padding: 12px 20px;
           font-size: 16px;
           cursor: pointer;
+        }}
+
+        button:disabled {{
+          cursor: wait;
+          opacity: 0.6;
         }}
 
         .card {{
@@ -774,27 +910,35 @@ def page(body_html: str) -> str:
         }}
 
         #loading-overlay {{
-          display:none;
-          position:fixed;
-          top:0;
-          left:0;
-          width:100%;
-          height:100%;
-          background:rgba(255,255,255,0.96);
-          z-index:9999;
-          text-align:center;
-          padding-top:35vh;
-          font-size:18px;
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(255,255,255,0.96);
+          z-index: 9999;
+          text-align: center;
+          padding-top: 35vh;
+          font-size: 18px;
         }}
+
       </style>
+
     </head>
 
     <body>
 
       <div id="loading-overlay">
+
         Working&hellip;
+
         <br>
-        <small>Please don't close this tab.</small>
+
+        <small>
+          Please don't close this tab.
+        </small>
+
       </div>
 
       <h2>Ren Media V2</h2>
@@ -802,33 +946,50 @@ def page(body_html: str) -> str:
       {body_html}
 
       <script>
-        document.querySelectorAll('form').forEach(function(form) {{
-          form.addEventListener('submit', function() {{
-            const overlay =
-              document.getElementById('loading-overlay');
 
-            if (overlay) {{
-              overlay.style.display = 'block';
-            }}
+        document.querySelectorAll("form")
+          .forEach(function(form) {{
 
-            form.querySelectorAll('button[type=submit]')
-              .forEach(function(button) {{
-                button.disabled = true;
-              }});
+            form.addEventListener(
+              "submit",
+              function() {{
+
+                const overlay =
+                  document.getElementById(
+                    "loading-overlay"
+                  );
+
+                if (overlay) {{
+                  overlay.style.display = "block";
+                }}
+
+                form.querySelectorAll(
+                  "button[type=submit]"
+                ).forEach(
+                  function(button) {{
+                    button.disabled = true;
+                  }}
+                );
+
+              }}
+            );
+
           }});
-        }});
+
       </script>
 
     </body>
+
     </html>
     """
 
 
 # =============================================================================
-# TITLE PARSING
+# TITLE ANALYSIS PARSING
 # =============================================================================
 
 def parse_title_analysis(raw_text):
+
     fields = {
         "ASSESSMENT": "",
         "WEAKNESSES": "",
@@ -838,37 +999,55 @@ def parse_title_analysis(raw_text):
         "AUDIENCE": "",
         "CORE PROMISE": "",
         "CURIOSITY ANGLE": "",
+        "SOURCE ROLE": "",
+        "EVIDENCE LIMITS": "",
     }
 
     current = None
 
     for line in raw_text.splitlines():
+
         stripped = line.strip()
 
         matched = False
 
         for key in fields:
+
             prefix = key + ":"
 
-            if stripped.upper().startswith(prefix):
+            if stripped.upper().startswith(
+                prefix
+            ):
+
                 current = key
-                fields[key] = stripped[len(prefix):].strip()
+
+                fields[key] = (
+                    stripped[len(prefix):]
+                    .strip()
+                )
+
                 matched = True
+
                 break
 
         if not matched and current:
+
             fields[current] += (
                 ("\n" if fields[current] else "")
                 + stripped
             )
 
     if not fields["OPTIMIZED TITLE"]:
-        fields["OPTIMIZED TITLE"] = raw_text.strip()
+
+        fields["OPTIMIZED TITLE"] = (
+            raw_text.strip()
+        )
 
     return fields
 
 
 def clean_title_text(title):
+
     title = str(title or "").strip()
 
     title = title.strip('"')
@@ -884,17 +1063,52 @@ def clean_title_text(title):
 
 
 # =============================================================================
+# INPUT NORMALIZATION
+# =============================================================================
+
+def build_source_context(
+    input_type,
+    source_text="",
+    source_url="",
+):
+
+    if input_type == "passage":
+
+        return (
+            "CREATOR-SUPPLIED RESEARCH / PASSAGE:\n\n"
+            + source_text.strip()
+        )
+
+    if input_type == "url":
+
+        return (
+            "CREATOR-SUPPLIED SOURCE URL:\n\n"
+            + source_url.strip()
+            + "\n\n"
+            "IMPORTANT: The URL contents have not been retrieved "
+            "by this version of the system. Do not claim to have "
+            "read or analysed the article itself."
+        )
+
+    return ""
+
+
+# =============================================================================
 # TITLE CONTEXT
 # =============================================================================
 
 def get_youtube_context(topic):
+
     if not YOUTUBE_API_KEY:
+
         return (
             "No live YouTube search data is configured. "
-            "Use the title toolkit and general title principles."
-        ), ""
+            "Use the title toolkit and general title principles.",
+            "",
+        )
 
     try:
+
         results = search_current_titles(
             topic,
             YOUTUBE_API_KEY,
@@ -902,6 +1116,7 @@ def get_youtube_context(topic):
         )
 
         if not results:
+
             return (
                 "No current YouTube search data was found.",
                 "",
@@ -915,22 +1130,30 @@ def get_youtube_context(topic):
         )
 
         return (
-            "Current YouTube search examples:\n" + lines,
+            "Current YouTube search examples:\n"
+            + lines,
             "",
         )
 
     except QuotaExceededError:
+
         return (
             "Live YouTube search quota is unavailable. "
             "Use the internal title toolkit instead.",
-            "<p class='muted'>Live YouTube search quota unavailable.</p>",
+            "<p class='muted'>"
+            "Live YouTube search quota unavailable."
+            "</p>",
         )
 
     except Exception as exc:
+
         return (
             "Live YouTube search could not be completed. "
             "Use the internal title toolkit instead.",
-            f"<p class='muted'>Live title search unavailable: {esc(exc)}</p>",
+            "<p class='muted'>"
+            "Live title search unavailable: "
+            f"{esc(exc)}"
+            "</p>",
         )
 
 
@@ -943,24 +1166,113 @@ async def home():
 
     body_html = """
       <div class="card">
+
         <h3>Start a new video</h3>
 
         <p class="muted">
-          Enter the topic or working title.
-          Ren Media will analyse it before planning the script.
+          Start with a title, topic, research passage,
+          article URL, or YouTube video.
         </p>
 
-        <form method="post" action="/analyze">
+        <form
+          method="post"
+          action="/analyze"
+        >
 
-          <input
-            name="topic"
-            placeholder="e.g. why women lose interest fast"
+          <label>
+            <strong>How do you want to start?</strong>
+          </label>
+
+          <select
+            name="input_type"
+            id="input_type"
             required
           >
 
+            <option value="topic">
+              Title / Topic
+            </option>
+
+            <option value="passage">
+              Research / Passage
+            </option>
+
+            <option value="url">
+              Article / Research URL
+            </option>
+
+          </select>
+
           <br><br>
 
-          <label>Target length in minutes</label>
+          <div id="topic_input">
+
+            <label>
+              <strong>Title or topic</strong>
+            </label>
+
+            <input
+              name="topic"
+              placeholder="e.g. why women lose interest fast"
+            >
+
+          </div>
+
+          <div
+            id="passage_input"
+            style="display:none;"
+          >
+
+            <label>
+              <strong>Research / passage</strong>
+            </label>
+
+            <textarea
+              name="source_text"
+              rows="14"
+              placeholder="Paste research, a passage, notes, study material, or article text here..."
+            ></textarea>
+
+          </div>
+
+          <div
+            id="url_input"
+            style="display:none;"
+          >
+
+            <label>
+              <strong>Article / research URL</strong>
+            </label>
+
+            <input
+              name="source_url"
+              type="url"
+              placeholder="https://..."
+            >
+
+          </div>
+
+          <br>
+
+          <label>
+            <strong>
+              What do you want to make from it?
+            </strong>
+          </label>
+
+          <textarea
+            name="creative_direction"
+            rows="4"
+            placeholder="Optional. Example: Explain this research in simple language for men 25–45."
+          ></textarea>
+
+          <br>
+
+          <label>
+            <strong>
+              Target length in minutes
+            </strong>
+          </label>
 
           <input
             name="length_minutes"
@@ -979,13 +1291,19 @@ async def home():
           </button>
 
         </form>
+
       </div>
 
       <div class="card">
 
-        <h3>Use a YouTube video as inspiration</h3>
+        <h3>
+          Use a YouTube video as inspiration
+        </h3>
 
-        <form method="post" action="/video-inspiration">
+        <form
+          method="post"
+          action="/video-inspiration"
+        >
 
           <input
             name="video_url"
@@ -1002,6 +1320,49 @@ async def home():
         </form>
 
       </div>
+
+      <script>
+
+        const inputType =
+          document.getElementById("input_type");
+
+        const topicInput =
+          document.getElementById("topic_input");
+
+        const passageInput =
+          document.getElementById("passage_input");
+
+        const urlInput =
+          document.getElementById("url_input");
+
+        function updateInputMode() {{
+
+          topicInput.style.display = "none";
+          passageInput.style.display = "none";
+          urlInput.style.display = "none";
+
+          if (inputType.value === "topic") {{
+            topicInput.style.display = "block";
+          }}
+
+          if (inputType.value === "passage") {{
+            passageInput.style.display = "block";
+          }}
+
+          if (inputType.value === "url") {{
+            urlInput.style.display = "block";
+          }}
+
+        }}
+
+        inputType.addEventListener(
+          "change",
+          updateInputMode
+        );
+
+        updateInputMode();
+
+      </script>
     """
 
     return page(body_html)
@@ -1011,23 +1372,117 @@ async def home():
 # ANALYZE
 # =============================================================================
 
-@app.post("/analyze", response_class=HTMLResponse)
+@app.post(
+    "/analyze",
+    response_class=HTMLResponse,
+)
 async def analyze(
-    topic: str = Form(...),
+    input_type: str = Form("topic"),
+    topic: str = Form(""),
+    source_text: str = Form(""),
+    source_url: str = Form(""),
+    creative_direction: str = Form(""),
     length_minutes: str = Form("10"),
 ):
 
     if not GEMINI_API_KEY:
+
         return page(
-            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+            "<p class='critical'>"
+            "Missing GEMINI_API_KEY."
+            "</p>"
         )
 
     try:
-        length = int(float(length_minutes))
-    except ValueError:
+
+        length = int(
+            float(length_minutes)
+        )
+
+    except (ValueError, TypeError):
+
         length = 10
 
-    context_block, quota_note = get_youtube_context(topic)
+    if length < 1:
+        length = 1
+
+    if length > 60:
+        length = 60
+
+    input_type = (
+        input_type or "topic"
+    ).strip().lower()
+
+    topic = topic.strip()
+    source_text = source_text.strip()
+    source_url = source_url.strip()
+    creative_direction = (
+        creative_direction.strip()
+    )
+
+    if input_type == "topic":
+
+        if not topic:
+
+            return page(
+                "<p class='critical'>"
+                "Please provide a title or topic."
+                "</p>"
+            )
+
+        source_context = ""
+
+    elif input_type == "passage":
+
+        if not source_text:
+
+            return page(
+                "<p class='critical'>"
+                "Please provide the research or passage."
+                "</p>"
+            )
+
+        source_context = build_source_context(
+            input_type,
+            source_text=source_text,
+            source_url=source_url,
+        )
+
+    elif input_type == "url":
+
+        if not source_url:
+
+            return page(
+                "<p class='critical'>"
+                "Please provide a source URL."
+                "</p>"
+            )
+
+        source_context = build_source_context(
+            input_type,
+            source_text=source_text,
+            source_url=source_url,
+        )
+
+    else:
+
+        return page(
+            "<p class='critical'>"
+            "Unknown input type."
+            "</p>"
+        )
+
+    analysis_topic = (
+        topic
+        if topic
+        else creative_direction
+        if creative_direction
+        else "Create a useful video from the supplied source material."
+    )
+
+    context_block, quota_note = get_youtube_context(
+        analysis_topic
+    )
 
     title_frames_text = "\n".join(
         f"- {desc}"
@@ -1035,43 +1490,80 @@ async def analyze(
     )
 
     prompt = ANALYZE_PROMPT_TEMPLATE.format(
+        input_type=input_type,
         topic=topic,
+        source_context=source_context,
+        creative_direction=creative_direction,
         context_block=context_block,
         title_frames=title_frames_text,
         frame_stacking_note=FRAME_STACKING_NOTE,
     )
 
     try:
+
         raw = call_gemini(prompt)
-        analysis = parse_title_analysis(raw)
+
+        analysis = parse_title_analysis(
+            raw
+        )
+
     except Exception as exc:
+
         return page(
-            f"<p class='critical'>Analysis failed: "
-            f"{esc(exc)}</p>"
+            f"""
+            <p class='critical'>
+              Analysis failed:
+              {esc(exc)}
+            </p>
+            """
         )
 
     optimized_title = clean_title_text(
         analysis["OPTIMIZED TITLE"]
     )
 
+    if not optimized_title:
+
+        optimized_title = (
+            topic
+            or creative_direction
+            or "Untitled video"
+        )
+
+    strategy_topic = optimized_title
+
     try:
+
         strategy_map = select_strategy_map(
-            topic=optimized_title,
+            topic=strategy_topic,
             audience=analysis["AUDIENCE"],
             objective=analysis["CORE PROMISE"],
             length_minutes=length,
+            source_context=source_context,
+            creative_direction=creative_direction,
         )
+
     except Exception as exc:
+
         return page(
             f"""
             <div class="critical">
-              <strong>Strategy engine error</strong>
-              <p>{esc(exc)}</p>
+
+              <strong>
+                Strategy engine error
+              </strong>
+
+              <p>
+                {esc(exc)}
+              </p>
+
             </div>
             """
         )
 
-    strategy_text = result_to_text(strategy_map)
+    strategy_text = result_to_text(
+        strategy_map
+    )
 
     body_html = f"""
       <h3>1. Analyze</h3>
@@ -1079,24 +1571,82 @@ async def analyze(
       {quota_note}
 
       <div class="card">
+
         <strong>Assessment</strong>
-        <p>{esc(analysis["ASSESSMENT"])}</p>
+
+        <p>
+          {esc(analysis["ASSESSMENT"])}
+        </p>
+
       </div>
 
       <div class="card">
+
         <strong>Weaknesses</strong>
-        <p>{esc(analysis["WEAKNESSES"])}</p>
+
+        <p>
+          {esc(analysis["WEAKNESSES"])}
+        </p>
+
       </div>
 
       <div class="card">
+
         <strong>Recommendation</strong>
-        <p>{esc(analysis["RECOMMENDATION"])}</p>
+
+        <p>
+          {esc(analysis["RECOMMENDATION"])}
+        </p>
+
       </div>
 
-      <form method="post" action="/strategy-map">
+      <div class="card">
+
+        <strong>Source role</strong>
+
+        <p>
+          {esc(analysis["SOURCE ROLE"])}
+        </p>
+
+      </div>
+
+      <div class="card">
+
+        <strong>Evidence limits</strong>
+
+        <p>
+          {esc(analysis["EVIDENCE LIMITS"])}
+        </p>
+
+      </div>
+
+      <form
+        method="post"
+        action="/strategy-map"
+      >
+
+        <input
+          type="hidden"
+          name="input_type"
+          value="{esc(input_type)}"
+        >
+
+        <input
+          type="hidden"
+          name="source_context"
+          value="{esc(source_context)}"
+        >
+
+        <input
+          type="hidden"
+          name="creative_direction"
+          value="{esc(creative_direction)}"
+        >
 
         <label>
-          <strong>Optimized title</strong>
+          <strong>
+            Optimized title
+          </strong>
         </label>
 
         <input
@@ -1108,7 +1658,9 @@ async def analyze(
         <br><br>
 
         <label>
-          <strong>Audience</strong>
+          <strong>
+            Audience
+          </strong>
         </label>
 
         <input
@@ -1119,7 +1671,9 @@ async def analyze(
         <br><br>
 
         <label>
-          <strong>Core promise</strong>
+          <strong>
+            Core promise
+          </strong>
         </label>
 
         <textarea
@@ -1130,7 +1684,9 @@ async def analyze(
         <br><br>
 
         <label>
-          <strong>Curiosity angle</strong>
+          <strong>
+            Curiosity angle
+          </strong>
         </label>
 
         <textarea
@@ -1141,7 +1697,9 @@ async def analyze(
         <br><br>
 
         <label>
-          <strong>Target length</strong>
+          <strong>
+            Target length
+          </strong>
         </label>
 
         <input
@@ -1155,7 +1713,9 @@ async def analyze(
         <br><br>
 
         <label>
-          <strong>Strategy map</strong>
+          <strong>
+            Strategy map
+          </strong>
         </label>
 
         <p class="muted">
@@ -1177,7 +1737,9 @@ async def analyze(
       </form>
 
       <p>
-        <a href="/">&larr; Start over</a>
+        <a href="/">
+          &larr; Start over
+        </a>
       </p>
     """
 
@@ -1188,7 +1750,10 @@ async def analyze(
 # STRATEGY MAP → OUTLINE
 # =============================================================================
 
-@app.post("/strategy-map", response_class=HTMLResponse)
+@app.post(
+    "/strategy-map",
+    response_class=HTMLResponse,
+)
 async def strategy_map(
     topic: str = Form(...),
     audience: str = Form(""),
@@ -1196,21 +1761,42 @@ async def strategy_map(
     curiosity_angle: str = Form(""),
     length_minutes: str = Form("10"),
     strategy_map: str = Form(...),
+    input_type: str = Form("topic"),
+    source_context: str = Form(""),
+    creative_direction: str = Form(""),
 ):
 
     if not GEMINI_API_KEY:
+
         return page(
-            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+            "<p class='critical'>"
+            "Missing GEMINI_API_KEY."
+            "</p>"
         )
 
     try:
-        length = int(float(length_minutes))
-    except ValueError:
+
+        length = int(
+            float(length_minutes)
+        )
+
+    except (ValueError, TypeError):
+
         length = 10
 
-    word_target = int(length * WORDS_PER_MINUTE)
+    if length < 1:
+        length = 1
 
-    governance_text = get_governance_text(strategy_map)
+    if length > 60:
+        length = 60
+
+    word_target = int(
+        length * WORDS_PER_MINUTE
+    )
+
+    governance_text = get_governance_text(
+        strategy_map
+    )
 
     rehook_text = "\n".join(
         f"- {desc}"
@@ -1219,6 +1805,8 @@ async def strategy_map(
 
     prompt = OUTLINE_PROMPT_TEMPLATE.format(
         topic=topic,
+        creative_direction=creative_direction,
+        source_context=source_context,
         length_minutes=length,
         word_target=word_target,
         strategy_map=strategy_map,
@@ -1229,15 +1817,26 @@ async def strategy_map(
     )
 
     try:
-        outline_text = call_gemini(prompt)
+
+        outline_text = call_gemini(
+            prompt
+        )
+
     except Exception as exc:
+
         return page(
-            f"<p class='critical'>Outline generation failed: "
-            f"{esc(exc)}</p>"
+            f"""
+            <p class='critical'>
+              Outline generation failed:
+              {esc(exc)}
+            </p>
+            """
         )
 
     body_html = f"""
-      <h3>2. Review / Edit Script Plan</h3>
+      <h3>
+        2. Review / Edit Script Plan
+      </h3>
 
       <div class="card">
 
@@ -1246,7 +1845,10 @@ async def strategy_map(
           Edit it before the prose is generated.
         </p>
 
-        <form method="post" action="/script">
+        <form
+          method="post"
+          action="/script"
+        >
 
           <input
             type="hidden"
@@ -1264,6 +1866,30 @@ async def strategy_map(
             type="hidden"
             name="objective"
             value="{esc(objective)}"
+          >
+
+          <input
+            type="hidden"
+            name="curiosity_angle"
+            value="{esc(curiosity_angle)}"
+          >
+
+          <input
+            type="hidden"
+            name="input_type"
+            value="{esc(input_type)}"
+          >
+
+          <input
+            type="hidden"
+            name="source_context"
+            value="{esc(source_context)}"
+          >
+
+          <input
+            type="hidden"
+            name="creative_direction"
+            value="{esc(creative_direction)}"
           >
 
           <input
@@ -1295,7 +1921,9 @@ async def strategy_map(
       </div>
 
       <p>
-        <a href="/">&larr; Start over</a>
+        <a href="/">
+          &larr; Start over
+        </a>
       </p>
     """
 
@@ -1306,48 +1934,86 @@ async def strategy_map(
 # SCRIPT GENERATION
 # =============================================================================
 
-@app.post("/script", response_class=HTMLResponse)
+@app.post(
+    "/script",
+    response_class=HTMLResponse,
+)
 async def script(
     topic: str = Form(...),
     audience: str = Form(""),
     objective: str = Form(""),
+    curiosity_angle: str = Form(""),
     length_minutes: str = Form("10"),
     strategy_map: str = Form(...),
     outline: str = Form(...),
+    input_type: str = Form("topic"),
+    source_context: str = Form(""),
+    creative_direction: str = Form(""),
 ):
 
     if not GEMINI_API_KEY:
+
         return page(
-            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+            "<p class='critical'>"
+            "Missing GEMINI_API_KEY."
+            "</p>"
         )
 
     try:
-        length = int(float(length_minutes))
-    except ValueError:
+
+        length = int(
+            float(length_minutes)
+        )
+
+    except (ValueError, TypeError):
+
         length = 10
 
-    word_target = int(length * WORDS_PER_MINUTE)
+    if length < 1:
+        length = 1
 
-    governance_text = get_governance_text(strategy_map)
+    if length > 60:
+        length = 60
+
+    word_target = int(
+        length * WORDS_PER_MINUTE
+    )
+
+    governance_text = get_governance_text(
+        strategy_map
+    )
 
     prompt = SCRIPT_PROMPT_TEMPLATE.format(
         topic=topic,
+        creative_direction=creative_direction,
+        source_context=source_context,
         length_minutes=length,
         word_target=word_target,
         strategy_map=strategy_map,
         outline=outline,
         governance=governance_text,
         humanizing_guidelines=HUMANIZING_GUIDELINES,
-        banned_phrases=", ".join(BANNED_PHRASES),
+        banned_phrases=", ".join(
+            BANNED_PHRASES
+        ),
         pacing_example=PACING_EXAMPLE,
     )
 
     try:
-        script_text = call_gemini(prompt)
+
+        script_text = call_gemini(
+            prompt
+        )
+
     except Exception as exc:
+
         return page(
-            f"<p class='critical'>Script generation failed: "
-            f"{esc(exc)}</p>"
+            f"""
+            <p class='critical'>
+              Script generation failed:
+              {esc(exc)}
+            </p>
+            """
         )
 
     # -------------------------------------------------------------------------
@@ -1355,6 +2021,7 @@ async def script(
     # -------------------------------------------------------------------------
 
     try:
+
         validation = validate_generated_script(
             script_text=script_text,
             topic=topic,
@@ -1362,31 +2029,50 @@ async def script(
             strategy_map=strategy_map,
             length_minutes=length,
         )
+
     except Exception as exc:
+
         return page(
             f"""
             <div class="critical">
-              <h3>Validation could not run</h3>
-              <p>{esc(exc)}</p>
+
+              <h3>
+                Validation could not run
+              </h3>
+
+              <p>
+                {esc(exc)}
+              </p>
+
               <p>
                 The script has NOT been silently passed through.
                 Fix the validator integration before relying on V2.
               </p>
+
             </div>
             """
         )
 
-    status = validation_status(validation)
-    validation_text = result_to_text(validation)
+    status = validation_status(
+        validation
+    )
+
+    validation_text = result_to_text(
+        validation
+    )
 
     if status == "CRITICAL":
 
         body_html = f"""
-          <h3>3. Script Validation</h3>
+          <h3>
+            3. Script Validation
+          </h3>
 
           <div class="critical">
 
-            <h3>CRITICAL</h3>
+            <h3>
+              CRITICAL
+            </h3>
 
             <p>
               The generated script contains one or more issues
@@ -1404,9 +2090,14 @@ async def script(
 
           </div>
 
-          <h3>Generated Script</h3>
+          <h3>
+            Generated Script
+          </h3>
 
-          <form method="post" action="/accept-script">
+          <form
+            method="post"
+            action="/accept-script"
+          >
 
             <input
               type="hidden"
@@ -1428,32 +2119,37 @@ async def script(
           </form>
 
           <p>
-            <a href="/">&larr; Start over</a>
+            <a href="/">
+              &larr; Start over
+            </a>
           </p>
         """
 
         return page(body_html)
 
-    # -------------------------------------------------------------------------
-    # PASS / WARNING
-    # -------------------------------------------------------------------------
-
     body_html = f"""
-      <h3>3. Script Validation</h3>
+      <h3>
+        3. Script Validation
+      </h3>
 
       <div class="pass">
 
-        <h3>PASS</h3>
+        <h3>
+          PASS
+        </h3>
 
         <p>
-          The validator did not identify a critical blocking failure.
+          The validator did not identify a critical
+          blocking failure.
         </p>
 
       </div>
 
       <div class="card">
 
-        <h3>Validation report</h3>
+        <h3>
+          Validation report
+        </h3>
 
         <pre style="
           white-space:pre-wrap;
@@ -1462,9 +2158,20 @@ async def script(
 
       </div>
 
-      <h3>Review / Edit Final Script</h3>
+      <h3>
+        Review / Edit Final Script
+      </h3>
 
-      <form method="post" action="/voiceover">
+      <form
+        method="post"
+        action="/voiceover"
+      >
+
+        <input
+          type="hidden"
+          name="topic"
+          value="{esc(topic)}"
+        >
 
         <textarea
           name="script_text"
@@ -1475,13 +2182,17 @@ async def script(
         <br><br>
 
         <label>
-          <strong>Voice</strong>
+          <strong>
+            Voice
+          </strong>
         </label>
 
         <select name="voice">
 
           {"".join(
-              f'<option value="{esc(v)}">{esc(label)}</option>'
+              f'<option value="{esc(v)}">'
+              f'{esc(label)}'
+              f'</option>'
               for v, label in VOICES
           )}
 
@@ -1496,7 +2207,9 @@ async def script(
       </form>
 
       <p>
-        <a href="/">&larr; Start over</a>
+        <a href="/">
+          &larr; Start over
+        </a>
       </p>
     """
 
@@ -1505,31 +2218,46 @@ async def script(
 
 # =============================================================================
 # CRITICAL VALIDATION OVERRIDE
-#
-# The validator never silently rewrites the user's work.
-# The user remains the final editor.
 # =============================================================================
 
-@app.post("/accept-script", response_class=HTMLResponse)
+@app.post(
+    "/accept-script",
+    response_class=HTMLResponse,
+)
 async def accept_script(
     topic: str = Form(...),
     script_text: str = Form(...),
 ):
 
     voice_options = "".join(
-        f'<option value="{esc(v)}">{esc(label)}</option>'
+        f'<option value="{esc(v)}">'
+        f'{esc(label)}'
+        f'</option>'
         for v, label in VOICES
     )
 
     body_html = f"""
-      <h3>Final Script Review</h3>
+      <h3>
+        Final Script Review
+      </h3>
 
       <p class="warning">
-        You chose to continue after reviewing a critical validation report.
+        You chose to continue after reviewing a critical
+        validation report.
+
         The system has not silently modified your script.
       </p>
 
-      <form method="post" action="/voiceover">
+      <form
+        method="post"
+        action="/voiceover"
+      >
+
+        <input
+          type="hidden"
+          name="topic"
+          value="{esc(topic)}"
+        >
 
         <textarea
           name="script_text"
@@ -1540,11 +2268,15 @@ async def accept_script(
         <br><br>
 
         <label>
-          <strong>Voice</strong>
+          <strong>
+            Voice
+          </strong>
         </label>
 
         <select name="voice">
+
           {voice_options}
+
         </select>
 
         <br><br>
@@ -1556,7 +2288,9 @@ async def accept_script(
       </form>
 
       <p>
-        <a href="/">&larr; Start over</a>
+        <a href="/">
+          &larr; Start over
+        </a>
       </p>
     """
 
@@ -1567,23 +2301,35 @@ async def accept_script(
 # VIDEO INSPIRATION
 # =============================================================================
 
-@app.post("/video-inspiration", response_class=HTMLResponse)
+@app.post(
+    "/video-inspiration",
+    response_class=HTMLResponse,
+)
 async def video_inspiration(
     video_url: str = Form(...),
 ):
 
     if not GEMINI_API_KEY:
+
         return page(
-            "<p class='critical'>Missing GEMINI_API_KEY.</p>"
+            "<p class='critical'>"
+            "Missing GEMINI_API_KEY."
+            "</p>"
         )
 
     if not YOUTUBE_API_KEY:
+
         return page(
-            "<p class='critical'>Missing YOUTUBE_API_KEY.</p>"
+            "<p class='critical'>"
+            "Missing YOUTUBE_API_KEY."
+            "</p>"
         )
 
     try:
-        video_id = extract_video_id(video_url)
+
+        video_id = extract_video_id(
+            video_url
+        )
 
         metadata = get_video_metadata(
             video_id,
@@ -1591,9 +2337,14 @@ async def video_inspiration(
         )
 
     except Exception as exc:
+
         return page(
-            f"<p class='critical'>Could not read video: "
-            f"{esc(exc)}</p>"
+            f"""
+            <p class='critical'>
+              Could not read video:
+              {esc(exc)}
+            </p>
+            """
         )
 
     title_frames_text = "\n".join(
@@ -1601,20 +2352,36 @@ async def video_inspiration(
         for desc in TITLE_FRAMES.values()
     )
 
-    prompt = VIDEO_INSPIRATION_PROMPT_TEMPLATE.format(
-        source_title=metadata["title"],
-        source_description=metadata["description"][:500],
-        source_tags=", ".join(metadata["tags"][:15]),
-        title_frames=title_frames_text,
-        frame_stacking_note=FRAME_STACKING_NOTE,
+    prompt = (
+        VIDEO_INSPIRATION_PROMPT_TEMPLATE
+        .format(
+            source_title=metadata["title"],
+            source_description=metadata[
+                "description"
+            ][:500],
+            source_tags=", ".join(
+                metadata["tags"][:15]
+            ),
+            title_frames=title_frames_text,
+            frame_stacking_note=FRAME_STACKING_NOTE,
+        )
     )
 
     try:
-        raw = call_gemini(prompt)
+
+        raw = call_gemini(
+            prompt
+        )
+
     except Exception as exc:
+
         return page(
-            f"<p class='critical'>Suggestion failed: "
-            f"{esc(exc)}</p>"
+            f"""
+            <p class='critical'>
+              Suggestion failed:
+              {esc(exc)}
+            </p>
+            """
         )
 
     title_match = re.search(
@@ -1646,26 +2413,44 @@ async def video_inspiration(
     )
 
     body_html = f"""
-      <h3>Inspired Video Angle</h3>
+      <h3>
+        Inspired Video Angle
+      </h3>
 
       <div class="card">
 
         <p>
-          <strong>Source:</strong>
+          <strong>
+            Source:
+          </strong>
+
           {esc(metadata["title"])}
         </p>
 
         <p>
-          This is inspiration only. The new idea should not copy
+          This is inspiration only.
+
+          The new idea should not copy
           the source video's wording or structure.
         </p>
 
       </div>
 
-      <form method="post" action="/analyze">
+      <form
+        method="post"
+        action="/analyze"
+      >
+
+        <input
+          type="hidden"
+          name="input_type"
+          value="topic"
+        >
 
         <label>
-          <strong>Suggested title / topic</strong>
+          <strong>
+            Suggested title / topic
+          </strong>
         </label>
 
         <input
@@ -1678,14 +2463,20 @@ async def video_inspiration(
 
         <div class="card">
 
-          <strong>Why this angle</strong>
+          <strong>
+            Why this angle
+          </strong>
 
-          <p>{esc(why)}</p>
+          <p>
+            {esc(why)}
+          </p>
 
         </div>
 
         <label>
-          <strong>Target length</strong>
+          <strong>
+            Target length
+          </strong>
         </label>
 
         <input
@@ -1705,7 +2496,9 @@ async def video_inspiration(
       </form>
 
       <p>
-        <a href="/">&larr; Start over</a>
+        <a href="/">
+          &larr; Start over
+        </a>
       </p>
     """
 
@@ -1721,18 +2514,25 @@ async def generate_voiceover(
     voice: str,
     filepath: str,
 ):
+
     communicate = edge_tts.Communicate(
         script_text,
         voice,
     )
 
-    await communicate.save(filepath)
+    await communicate.save(
+        filepath
+    )
 
 
-@app.post("/voiceover", response_class=HTMLResponse)
+@app.post(
+    "/voiceover",
+    response_class=HTMLResponse,
+)
 async def voiceover(
     script_text: str = Form(...),
     voice: str = Form("en-US-GuyNeural"),
+    topic: str = Form(""),
 ):
 
     safe_name = (
@@ -1745,7 +2545,8 @@ async def voiceover(
     )
 
     filename = (
-        f"{safe_name}-{int(time.time())}.mp3"
+        f"{safe_name}-"
+        f"{int(time.time())}.mp3"
     )
 
     filepath = os.path.join(
@@ -1765,29 +2566,48 @@ async def voiceover(
 
         body_html = f"""
           <p class="critical">
+
             Voiceover generation failed:
+
             {esc(exc)}
+
           </p>
 
-          <h3>Script</h3>
+          <h3>
+            Script
+          </h3>
 
-          <textarea rows="30">{esc(script_text)}</textarea>
+          <textarea rows="30">
+{esc(script_text)}
+          </textarea>
 
           <p>
-            <a href="/">&larr; Start over</a>
+            <a href="/">
+              &larr; Start over
+            </a>
           </p>
         """
 
-        return page(body_html)
+        return page(
+            body_html
+        )
 
     body_html = f"""
-      <h3>Ren Media V2 — Complete</h3>
+      <h3>
+        Ren Media V2 — Complete
+      </h3>
 
-      <h3>Final Script</h3>
+      <h3>
+        Final Script
+      </h3>
 
-      <textarea rows="30">{esc(script_text)}</textarea>
+      <textarea rows="30">
+{esc(script_text)}
+      </textarea>
 
-      <h3>Voiceover</h3>
+      <h3>
+        Voiceover
+      </h3>
 
       <audio
         controls
@@ -1805,8 +2625,12 @@ async def voiceover(
       </a>
 
       <p>
-        <a href="/">&larr; Create another video</a>
+        <a href="/">
+          &larr; Create another video
+        </a>
       </p>
     """
 
-    return page(body_html)
+    return page(
+        body_html
+    )
