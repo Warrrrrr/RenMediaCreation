@@ -29,6 +29,7 @@ from youtube_api import (
     search_current_titles,
     QuotaExceededError,
 )
+from claim_pipeline import extract_claim_register
 
 # =============================================================================
 # V2 MODULES
@@ -38,6 +39,7 @@ strategies_module = importlib.import_module("strategies")
 strategy_engine_module = importlib.import_module("strategy_engine")
 governance_module = importlib.import_module("governance")
 validator_module = importlib.import_module("validator")
+control_plane_module = importlib.import_module("control_plane")
 
 
 # =============================================================================
@@ -265,6 +267,7 @@ def validate_generated_script(
     outline,
     strategy_map,
     length_minutes,
+    claim_register=None,
 ):
 
     fn = _module_callable(
@@ -298,6 +301,8 @@ def validate_generated_script(
         "strategies": strategy_map,
         "governance": governance_text,
         "governance_rules": governance_text,
+        "claim_register": claim_register,
+        "claims": claim_register,
         "length_minutes": length_minutes,
         "target_minutes": length_minutes,
     }
@@ -441,6 +446,12 @@ Approximately {word_target} spoken words.
 APPROVED STRATEGY MAP:
 {strategy_map}
 
+CLAIM REGISTER:
+{claim_register}
+
+Treat the claim register as the evidence boundary. Do not upgrade
+source claims into independently verified facts.
+
 GOVERNANCE:
 {governance}
 
@@ -518,6 +529,12 @@ APPROVED STRATEGY MAP:
 
 APPROVED OUTLINE:
 {outline}
+
+CLAIM REGISTER:
+{claim_register}
+
+Treat the claim register as the evidence boundary. Do not upgrade
+source claims into independently verified facts.
 
 GOVERNANCE:
 {governance}
@@ -1255,9 +1272,7 @@ async def home():
           <br>
 
           <label>
-            <strong>
-              What do you want to make from it?
-            </strong>
+            <strong>What do you want to make from it?</strong>
           </label>
 
           <textarea
@@ -1269,9 +1284,7 @@ async def home():
           <br>
 
           <label>
-            <strong>
-              Target length in minutes
-            </strong>
+            <strong>Target length in minutes</strong>
           </label>
 
           <input
@@ -1296,9 +1309,11 @@ async def home():
 
       <div class="card">
 
-        <h3>
-          Use a YouTube video as inspiration
-        </h3>
+        <h3>Video inspiration</h3>
+
+        <p class="muted">
+          Use a public YouTube video only as inspiration for a genuinely different angle.
+        </p>
 
         <form
           method="post"
@@ -1307,14 +1322,15 @@ async def home():
 
           <input
             name="video_url"
-            placeholder="https://youtube.com/watch?v=..."
+            type="url"
+            placeholder="https://www.youtube.com/watch?v=..."
             required
           >
 
           <br><br>
 
           <button type="submit">
-            Find New Angle
+            Find a Different Angle
           </button>
 
         </form>
@@ -1470,6 +1486,23 @@ async def analyze(
             "<p class='critical'>"
             "Unknown input type."
             "</p>"
+        )
+
+    try:
+
+        claim_register = extract_claim_register(
+            source_context
+        )
+
+    except Exception as exc:
+
+        return page(
+            f"""
+            <p class='critical'>
+              Claim Register extraction failed:
+              {esc(exc)}
+            </p>
+            """
         )
 
     analysis_topic = (
@@ -1639,6 +1672,12 @@ async def analyze(
 
         <input
           type="hidden"
+          name="claim_register"
+          value="{esc(_json_safe(claim_register))}"
+        >
+
+        <input
+          type="hidden"
           name="creative_direction"
           value="{esc(creative_direction)}"
         >
@@ -1763,6 +1802,7 @@ async def strategy_map(
     strategy_map: str = Form(...),
     input_type: str = Form("topic"),
     source_context: str = Form(""),
+    claim_register: str = Form("{}"),
     creative_direction: str = Form(""),
 ):
 
@@ -1794,6 +1834,33 @@ async def strategy_map(
         length * WORDS_PER_MINUTE
     )
 
+    try:
+
+        claim_register_data = json.loads(
+            claim_register or "{}"
+        )
+
+        claims = (
+            claim_register_data.get("claims", [])
+            if isinstance(claim_register_data, dict)
+            else []
+        )
+
+        control_plane_module.build_claim_register(
+            claims
+        )
+
+    except Exception as exc:
+
+        return page(
+            f"""
+            <p class='critical'>
+              Claim Register validation failed:
+              {esc(exc)}
+            </p>
+            """
+        )
+
     governance_text = get_governance_text(
         strategy_map
     )
@@ -1810,6 +1877,7 @@ async def strategy_map(
         length_minutes=length,
         word_target=word_target,
         strategy_map=strategy_map,
+        claim_register=claim_register,
         governance=governance_text,
         structure=STRUCTURE_TEMPLATE,
         hook_framework=HOOK_FRAMEWORK,
@@ -1888,6 +1956,12 @@ async def strategy_map(
 
           <input
             type="hidden"
+            name="claim_register"
+            value="{esc(claim_register)}"
+          >
+
+          <input
+            type="hidden"
             name="creative_direction"
             value="{esc(creative_direction)}"
           >
@@ -1948,6 +2022,7 @@ async def script(
     outline: str = Form(...),
     input_type: str = Form("topic"),
     source_context: str = Form(""),
+    claim_register: str = Form("{}"),
     creative_direction: str = Form(""),
 ):
 
@@ -1979,6 +2054,33 @@ async def script(
         length * WORDS_PER_MINUTE
     )
 
+    try:
+
+        claim_register_data = json.loads(
+            claim_register or "{}"
+        )
+
+        claims = (
+            claim_register_data.get("claims", [])
+            if isinstance(claim_register_data, dict)
+            else []
+        )
+
+        control_plane_module.build_claim_register(
+            claims
+        )
+
+    except Exception as exc:
+
+        return page(
+            f"""
+            <p class='critical'>
+              Claim Register validation failed:
+              {esc(exc)}
+            </p>
+            """
+        )
+
     governance_text = get_governance_text(
         strategy_map
     )
@@ -1991,6 +2093,7 @@ async def script(
         word_target=word_target,
         strategy_map=strategy_map,
         outline=outline,
+        claim_register=claim_register,
         governance=governance_text,
         humanizing_guidelines=HUMANIZING_GUIDELINES,
         banned_phrases=", ".join(
@@ -2028,6 +2131,7 @@ async def script(
             outline=outline,
             strategy_map=strategy_map,
             length_minutes=length,
+            claim_register=claim_register,
         )
 
     except Exception as exc:
@@ -2445,6 +2549,12 @@ async def video_inspiration(
           type="hidden"
           name="input_type"
           value="topic"
+        >
+
+        <input
+          type="hidden"
+          name="topic"
+          value="{esc(suggested_title)}"
         >
 
         <label>
