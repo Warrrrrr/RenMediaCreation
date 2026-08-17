@@ -105,6 +105,51 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(result.get("critical", []), [])
 
+    def test_validator_rejects_incomplete_strategy_evaluation(self):
+        result = {
+            "status": "PASS",
+            "strategy_evaluation": [{
+                "strategy_key": "curiosity_gaps",
+                "executed": True,
+                "job_completed": True,
+                "locations": ["opening"],
+                "assessment": "Executed effectively.",
+                "status": "PASS",
+            }],
+        }
+        result = _enforce_strategy_scope(result, ["curiosity_gaps", "contrast"])
+        self.assertEqual(result["status"], "CRITICAL")
+        self.assertEqual([item["strategy_key"] for item in result["strategy_evaluation"]], ["curiosity_gaps"])
+        self.assertTrue(any("contrast" in item for item in result["critical"]))
+
+    def test_validator_rejects_malformed_strategy_evaluation(self):
+        result = {
+            "status": "PASS",
+            "strategy_evaluation": [{
+                "strategy_key": "curiosity_gaps",
+                "executed": True,
+            }],
+        }
+        result = _enforce_strategy_scope(result, ["curiosity_gaps"])
+        self.assertEqual(result["status"], "CRITICAL")
+        self.assertEqual(result["strategy_evaluation"], [])
+
+    def test_validator_accepts_complete_strategy_evaluation(self):
+        result = {
+            "status": "PASS",
+            "strategy_evaluation": [{
+                "strategy_key": "curiosity_gaps",
+                "executed": True,
+                "job_completed": True,
+                "locations": ["opening"],
+                "assessment": "Executed effectively.",
+                "status": "PASS",
+            }],
+        }
+        result = _enforce_strategy_scope(result, ["curiosity_gaps"])
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(len(result["strategy_evaluation"]), 1)
+
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
 

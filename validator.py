@@ -100,7 +100,17 @@ GOVERNANCE
 {governance}
 
 STRATEGY VALIDATION
-For each approved strategy, evaluate actual execution, job completion, appropriateness and overuse. Do not treat keyword presence as execution.
+For EACH approved strategy, return exactly one strategy_evaluation object using its exact strategy key.
+Each object MUST contain:
+- strategy_key
+- executed (true/false)
+- job_completed (true/false)
+- locations (list of concrete script locations or section descriptions)
+- assessment (specific explanation of execution and job completion)
+- status (PASS|WARNING|CRITICAL)
+
+Evaluate actual execution, job completion, appropriateness and overuse. Do not treat keyword presence as execution.
+Do not omit an approved strategy. Do not add a strategy that is not approved.
 
 CLAIM COVERAGE GATE
 Identify every important factual, scientific, historical, statistical, psychological, medical, financial, legal, or research-based assertion introduced by the generated script.
@@ -207,31 +217,37 @@ def _parse_validator_json(raw):
 def _enforce_strategy_scope(result, approved_keys):
     approved_set = {str(key).strip() for key in approved_keys if str(key).strip()}
     result["approved_strategy_keys"] = list(approved_keys)
+
     evaluations = result.get("strategy_evaluation", [])
     if not isinstance(evaluations, list):
         evaluations = []
+
     filtered = []
     seen = set()
+    required_fields = {"strategy_key", "executed", "job_completed", "locations", "assessment", "status"}
     for evaluation in evaluations:
         if not isinstance(evaluation, dict):
             continue
         key = str(evaluation.get("strategy_key", "")).strip()
         if key not in approved_set or key in seen:
             continue
+        if not required_fields.issubset(evaluation):
+            continue
         seen.add(key)
         filtered.append(evaluation)
-    existing = {item.get("strategy_key") for item in filtered}
-    for key in approved_keys:
-        if key not in existing:
-            filtered.append({
-                "strategy_key": key,
-                "executed": False,
-                "job_completed": False,
-                "locations": [],
-                "assessment": "The validator did not produce a valid evaluation for this approved strategy.",
-                "status": "WARNING",
-            })
+
     result["strategy_evaluation"] = filtered
+
+    missing = [key for key in approved_keys if key not in seen]
+    if missing:
+        result["status"] = "CRITICAL"
+        critical = result.get("critical", [])
+        if not isinstance(critical, list):
+            critical = []
+        message = "Validator returned incomplete strategy evaluation for approved strategies: " + ", ".join(missing)
+        if message not in critical:
+            critical.append(message)
+        result["critical"] = critical
 
     claims = result.get("claims", [])
     if not isinstance(claims, list):
