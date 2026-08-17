@@ -15,6 +15,13 @@ GEMINI_URL = (
     "v1beta/models/gemini-3.5-flash:generateContent"
 )
 
+CLAIM_COVERAGE_POLICY = {
+    "important_script_assertions": "must_be_supported_or_explicitly_flagged",
+    "unsupported_factual_assertions": "critical",
+    "topic_relatedness_is_not_evidence": True,
+    "specific_numbers_or_mechanisms_require_support": True,
+}
+
 
 def _parse_json(raw):
     text = str(raw or "").strip()
@@ -41,12 +48,18 @@ def _is_source_passage(source_context):
     return "CREATOR-SUPPLIED RESEARCH / PASSAGE:" in str(source_context or "")
 
 
+def _with_coverage_policy(register):
+    data = register.to_dict()
+    data["policy"] = CLAIM_COVERAGE_POLICY.copy()
+    return data
+
+
 def extract_claim_register(source_context):
     """Extract and validate source claims; topic-only flows receive an empty register."""
     if not _is_source_passage(source_context):
         return {
             "claims": [],
-            "policy": {},
+            "policy": CLAIM_COVERAGE_POLICY.copy(),
         }
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -89,4 +102,4 @@ def extract_claim_register(source_context):
 
     claims = _parse_json(raw)
     register = build_claim_register(claims)
-    return register.to_dict()
+    return _with_coverage_policy(register)
