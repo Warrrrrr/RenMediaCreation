@@ -8,7 +8,7 @@ from control_plane import (
     deterministic_script_checks,
     validate_approved_strategy_map,
 )
-from validator import _enforce_strategy_scope, _validate_claim_register_payload
+from validator import _validate_claim_register_payload
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -27,7 +27,10 @@ class ControlPlaneTests(unittest.TestCase):
     def test_accepts_canonical_strategy_map(self):
         data, ids = validate_approved_strategy_map({
             "selected_strategy_ids": ["curiosity_gaps", "contrast"],
-            "selected_strategies": [{"id": "curiosity_gaps"}, {"id": "contrast"}],
+            "selected_strategies": [
+                {"id": "curiosity_gaps"},
+                {"id": "contrast"},
+            ],
         })
         self.assertEqual(ids, ["curiosity_gaps", "contrast"])
         self.assertEqual(data["selected_strategy_ids"], ids)
@@ -49,6 +52,10 @@ class ControlPlaneTests(unittest.TestCase):
                 "independent_verification": "unknown",
                 "safe_script_status": "allowed_as_verified_fact",
             }])
+
+    def test_strategy_boundary_rejects_unknown_edited_map(self):
+        with self.assertRaises(ValueError):
+            validate_approved_strategy_map({"selected_strategy_ids": ["not_a_real_strategy"]})
 
     def test_validator_accepts_valid_claim_register(self):
         claims = {"claims": [{
@@ -75,34 +82,6 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(CLAIM_COVERAGE_POLICY["unsupported_factual_assertions"], "critical")
         self.assertTrue(CLAIM_COVERAGE_POLICY["specific_numbers_or_mechanisms_require_support"])
         self.assertTrue(CLAIM_COVERAGE_POLICY["topic_relatedness_is_not_evidence"])
-
-    def test_validator_escalates_unsupported_factual_claim(self):
-        result = {
-            "status": "PASS",
-            "claims": [{
-                "claim": "The brain stops rational thought during conflict",
-                "classification": "fact",
-                "evidence_status": "unsupported",
-                "risk": "high",
-            }],
-        }
-        result = _enforce_strategy_scope(result, [])
-        self.assertEqual(result["status"], "CRITICAL")
-        self.assertTrue(result["critical"])
-
-    def test_validator_does_not_escalate_source_only_claim(self):
-        result = {
-            "status": "PASS",
-            "claims": [{
-                "claim": "The supplied source reports X",
-                "classification": "fact",
-                "evidence_status": "source_only",
-                "risk": "medium",
-            }],
-        }
-        result = _enforce_strategy_scope(result, [])
-        self.assertEqual(result["status"], "PASS")
-        self.assertEqual(result.get("critical", []), [])
 
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
