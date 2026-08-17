@@ -1,5 +1,6 @@
 import unittest
 
+from claim_pipeline import CLAIM_COVERAGE_POLICY
 from claim_register import ClaimRegister, validate_claim_register
 from control_plane import (
     build_claim_register,
@@ -97,6 +98,18 @@ class ControlPlaneTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             _validate_claim_register_payload(claims)
+
+    def test_claim_coverage_policy_blocks_unsupported_assertions(self):
+        self.assertEqual(
+            CLAIM_COVERAGE_POLICY["unsupported_factual_assertions"],
+            "critical",
+        )
+        self.assertTrue(
+            CLAIM_COVERAGE_POLICY["specific_numbers_or_mechanisms_require_support"]
+        )
+        self.assertTrue(
+            CLAIM_COVERAGE_POLICY["topic_relatedness_is_not_evidence"]
+        )
 
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
