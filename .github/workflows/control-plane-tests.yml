@@ -14,4 +14,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run control-plane tests
-        run: python -m unittest -v test_control_plane.py
+        run: |
+          set +e
+          python -m unittest -v test_control_plane.py 2>&1 | tee test-output.txt
+          status=${PIPESTATUS[0]}
+          exit $status
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: control-plane-test-output
+          path: test-output.txt
