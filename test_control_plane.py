@@ -1,6 +1,5 @@
 import unittest
 
-from claim_pipeline import CLAIM_COVERAGE_POLICY
 from claim_register import ClaimRegister, validate_claim_register
 from control_plane import (
     build_claim_register,
@@ -8,7 +7,7 @@ from control_plane import (
     deterministic_script_checks,
     validate_approved_strategy_map,
 )
-from validator import _validate_claim_register_payload
+from validator import _enforce_strategy_scope, _validate_claim_register_payload
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -78,10 +77,33 @@ class ControlPlaneTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _validate_claim_register_payload(claims)
 
-    def test_claim_coverage_policy_blocks_unsupported_assertions(self):
-        self.assertEqual(CLAIM_COVERAGE_POLICY["unsupported_factual_assertions"], "critical")
-        self.assertTrue(CLAIM_COVERAGE_POLICY["specific_numbers_or_mechanisms_require_support"])
-        self.assertTrue(CLAIM_COVERAGE_POLICY["topic_relatedness_is_not_evidence"])
+    def test_validator_escalates_unsupported_factual_claim(self):
+        result = {
+            "status": "PASS",
+            "claims": [{
+                "claim": "The brain stops rational thought during conflict",
+                "classification": "fact",
+                "evidence_status": "unsupported",
+                "risk": "high",
+            }],
+        }
+        result = _enforce_strategy_scope(result, [])
+        self.assertEqual(result["status"], "CRITICAL")
+        self.assertTrue(result["critical"])
+
+    def test_validator_does_not_escalate_source_only_claim(self):
+        result = {
+            "status": "PASS",
+            "claims": [{
+                "claim": "The supplied source reports X",
+                "classification": "fact",
+                "evidence_status": "source_only",
+                "risk": "medium",
+            }],
+        }
+        result = _enforce_strategy_scope(result, [])
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result.get("critical", []), [])
 
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
