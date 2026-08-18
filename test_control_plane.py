@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from claim_register import ClaimRegister, validate_claim_register
@@ -8,6 +9,7 @@ from control_plane import (
     validate_approved_strategy_map,
 )
 from validator import _enforce_strategy_scope, _validate_claim_register_payload
+from visual_planner import build_visual_plan, build_visual_plan_prompt, parse_visual_plan
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -152,6 +154,73 @@ class ControlPlaneTests(unittest.TestCase):
 
     def test_registry_is_non_empty(self):
         self.assertTrue(canonical_strategy_ids())
+
+    def test_visual_plan_prompt_contains_script_and_topic(self):
+        prompt = build_visual_plan_prompt("A couple struggles to communicate.", "Communication")
+        self.assertIn("A couple struggles to communicate.", prompt)
+        self.assertIn("Communication", prompt)
+        self.assertIn("search_queries", prompt)
+
+    def test_parse_visual_plan_accepts_valid_json(self):
+        plan = {
+            "visual_plan": [{
+                "beat_id": 1,
+                "narration_summary": "A couple struggles to communicate.",
+                "visual_purpose": "Make the conflict immediately understandable.",
+                "visual_type": "stock_video",
+                "shot": "Two adults sitting apart during a tense conversation.",
+                "mood": "tense",
+                "search_queries": ["couple arguing", "tense couple conversation", "relationship conflict"],
+                "duration_seconds": 7,
+                "priority": "high",
+            }]
+        }
+        result = parse_visual_plan(json.dumps(plan))
+        self.assertEqual(result["visual_plan"][0]["beat_id"], 1)
+
+    def test_parse_visual_plan_rejects_invalid_visual_type(self):
+        plan = {
+            "visual_plan": [{
+                "beat_id": 1,
+                "narration_summary": "x",
+                "visual_purpose": "x",
+                "visual_type": "random_clip",
+                "shot": "x",
+                "mood": "x",
+                "search_queries": [],
+                "duration_seconds": 7,
+                "priority": "high",
+            }]
+        }
+        with self.assertRaises(ValueError):
+            parse_visual_plan(json.dumps(plan))
+
+    def test_build_visual_plan_passes_prompt_to_gemini(self):
+        captured = {}
+
+        def fake_gemini(prompt):
+            captured["prompt"] = prompt
+            return json.dumps({
+                "visual_plan": [{
+                    "beat_id": 1,
+                    "narration_summary": "x",
+                    "visual_purpose": "x",
+                    "visual_type": "stock_video",
+                    "shot": "x",
+                    "mood": "tense",
+                    "search_queries": ["couple arguing"],
+                    "duration_seconds": 7,
+                    "priority": "high",
+                }]
+            })
+
+        result = build_visual_plan("A couple struggles to communicate.", "Communication", fake_gemini)
+        self.assertTrue(result["visual_plan"])
+        self.assertIn("A couple struggles to communicate.", captured["prompt"])
+
+    def test_build_visual_plan_requires_script(self):
+        with self.assertRaises(ValueError):
+            build_visual_plan("", "Topic", lambda prompt: "{}")
 
 
 if __name__ == "__main__":
